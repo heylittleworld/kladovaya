@@ -585,9 +585,11 @@ async function aiCall(payload) {
   if (!SB) throw new Error("Сначала подключи сервер: ☁︎ в правом верхнем углу.");
   let ses = null; try { ses = (await SB.auth.getSession()).data.session; } catch (e) {}
   if (!ses) throw new Error("Чтобы пользоваться ИИ, войди: ☁︎ в правом верхнем углу.");
-  let r; try { r = await fetch(window.KL_CONFIG.ai, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + ses.access_token }, body: JSON.stringify(payload) }); } catch (e) { throw new Error("Нет связи с ИИ. Проверь интернет."); }
+  // Authorization зарезервирован платформой Yandex для её IAM-токена.
+  let r; try { r = await fetch(window.KL_CONFIG.ai, { method: "POST", headers: { "Content-Type": "application/json", "X-Supabase-Authorization": "Bearer " + ses.access_token }, body: JSON.stringify(payload) }); } catch (e) { throw new Error("Не удалось связаться с ИИ. Возможна проблема с интернетом или доступом к сервису."); }
   let j = null; try { j = await r.json(); } catch (e) {}
-  if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || "ИИ не ответил (ошибка " + r.status + ")");
+  if (r.status === 403) throw new Error("Доступ к ИИ запрещён (403). Нужно проверить настройки доступа облачной функции.");
+  if (!r.ok || !j || !j.ok) throw new Error((j && typeof j.error === "string" && j.error) || "ИИ не ответил (ошибка " + r.status + ")");
   return j.data;
 }
 function registerAI() {
@@ -794,6 +796,30 @@ function render() {
   if (fid) { const n = document.getElementById(fid); if (n) { try { n.focus({ preventScroll: true }); if (selS != null && n.setSelectionRange) n.setSelectionRange(selS, selS); } catch (e) {} } }
 }
 function closeSheet() { ui.sheet = null; render(); }
+
+// На iPhone клавиатура уменьшает visualViewport, но не область fixed-элементов.
+function syncSheetViewport() {
+  const vp = window.visualViewport;
+  const height = vp ? vp.height : window.innerHeight;
+  const bottom = vp ? Math.max(0, window.innerHeight - vp.height - vp.offsetTop) : 0;
+  document.documentElement.style.setProperty("--sheet-bottom", bottom + "px");
+  document.documentElement.style.setProperty("--sheet-max-height", Math.max(0, height * 0.92) + "px");
+  const active = document.activeElement;
+  const sheet = active && active.closest && active.closest(".sheet");
+  if (sheet && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
+    const field = active.getBoundingClientRect(), bounds = sheet.getBoundingClientRect();
+    if (field.bottom > bounds.bottom - 16) sheet.scrollTop += field.bottom - bounds.bottom + 16;
+    else if (field.top < bounds.top + 16) sheet.scrollTop -= bounds.top + 16 - field.top;
+  }
+}
+function scheduleSheetViewport() { requestAnimationFrame(syncSheetViewport); }
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", scheduleSheetViewport);
+  window.visualViewport.addEventListener("scroll", scheduleSheetViewport);
+}
+window.addEventListener("resize", scheduleSheetViewport);
+document.addEventListener("focusin", scheduleSheetViewport);
+syncSheetViewport();
 
 /* ---------- действия ---------- */
 const A = {

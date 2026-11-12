@@ -163,6 +163,19 @@ var DICT_LIST = [
 var DICT = {};
 DICT_LIST.forEach(function (d) { DICT[d.id] = d; });
 
+/* объём целой упаковки по умолчанию: [число, единица] */
+var PACK = {
+  milk: [1000, "мл"], cream: [200, "мл"], butter: [180, "г"], cheese: [200, "г"], curd: [140, "г"], mozz: [125, "г"], feta: [200, "г"], tvorog: [180, "г"],
+  tofu: [300, "г"], salmon: [300, "г"], trout: [300, "г"], cod: [400, "г"], chickpea: [400, "г"], beans: [400, "г"], lentilRed: [450, "г"], lentilGreen: [450, "г"],
+  edamame: [400, "г"], rice: [800, "г"], buckwheat: [800, "г"], bulgur: [450, "г"], quinoa: [350, "г"], soba: [300, "г"], pasta: [450, "г"], oats: [500, "г"],
+  flour: [1000, "г"], starch: [500, "г"], sugar: [1000, "г"], bread: [400, "г"], seeds: [200, "г"], sesame: [100, "г"], walnut: [200, "г"],
+  potato: [2000, "г"], tomato: [250, "г"], mushrooms: [400, "г"], greenbeans: [400, "г"], corn: [340, "г"], spinach: [125, "г"], rucola: [125, "г"], romaine: [250, "г"],
+  dill: [50, "г"], parsley: [50, "г"], greenonion: [50, "г"], chim: [250, "г"], soy: [250, "мл"], mustard: [130, "г"], tahini: [300, "г"], oliveoil: [500, "мл"],
+  oil: [1000, "мл"], sesameoil: [250, "мл"], jam: [300, "г"], honey: [250, "г"], broth: [500, "мл"], sourcream: [300, "г"], kefir: [900, "мл"], yogurt: [300, "г"],
+  frozenVeg: [400, "г"], berries: [300, "г"], dumplings: [800, "г"], mince: [500, "г"], meat: [500, "г"], puree: [400, "г"], frozenHerbs: [100, "г"], dough: [500, "г"]
+};
+Object.keys(PACK).forEach(function (id) { if (DICT[id]) { DICT[id].pk = PACK[id][0]; DICT[id].u = PACK[id][1]; } });
+
 /* классические пары — для подсказок конструктора */
 var PAIRS = [
   ["pumpkin", "seeds", "Тыква + тыквенные семечки — мягкое и хрустящее из одного продукта"],

@@ -1,6 +1,6 @@
 /* Кладовая — работа без интернета.
    При обновлении приложения меняй номер версии ниже (kl-v2, kl-v3…). */
-const V = "kl-v3";
+const V = "kl-v4";
 const SHELL = ["./", "./index.html", "./app.js", "./data.js", "./supabase.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

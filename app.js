@@ -29,6 +29,7 @@ const ICON = {
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   back: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
   timer: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>',
+  camera: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
   share: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>',
   search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8A7A69" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
   storage: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M6 10h12M9 5v2M9 13v3"/></svg>',
@@ -75,7 +76,15 @@ function expLabel(p) {
   return "до " + fmtD(p.exp) + " · " + d + " " + plural(d, "день", "дня", "дней");
 }
 function isEmptyP(p) { return p.t === "count" ? (p.have || 0) <= 0 : p.t !== "can" && (p.l || 0) <= 0.02; }
-function leftText(p) { if (p.t === "count") return (p.have || 0) + " из " + (p.max || 0); if (p.t === "can") return "есть"; return "≈ " + Math.round((p.l || 0) * 100) + "%"; }
+function fmtQ(v, u) { v = Math.max(0, v || 0); if (v >= 1000 && (u === "г" || u === "мл")) return String(Math.round(v / 100) / 10).replace(".", ",") + (u === "г" ? " кг" : " л"); return Math.round(v) + " " + (u || "г"); }
+function leftText(p) {
+  const n = p.packs || 1;
+  if (p.t === "count") return (p.have || 0) + " из " + (p.max || 0);
+  if (p.t === "can") return n > 1 ? n + " " + plural(n, "банка", "банки", "банок") : "есть";
+  let s = p.pk ? "≈ " + fmtQ((p.l || 0) * p.pk, p.u) + " из " + fmtQ(p.pk, p.u) : "≈ " + Math.round((p.l || 0) * 100) + "%";
+  if (n > 1) s += " · ещё " + (n - 1) + " уп.";
+  return s;
+}
 function isLow(p) { return p.t === "count" ? p.max > 1 && p.have / p.max <= 0.34 : p.t !== "can" && p.l <= 0.35; }
 function matchesDict(p, id) { return p.d === id || (DICT[p.d] && DICT[p.d].ref === id); }
 const STOPW = { "консе": 1, "свежи": 1, "замор": 1, "варен": 1, "очище": 1, "порци": 1, "готов": 1, "домаш": 1, "плотн": 1, "больш": 1, "мелки": 1, "крупн": 1, "сушен": 1, "кусоч": 1, "упако": 1, "пачка": 1, "банка": 1 };
@@ -104,7 +113,7 @@ function dictDefaults(d) {
   return { t: u.t || d.t, z: u.z || d.z || "f1", c: d.c, cell: d.cell, n0: d.n0 || 1, s: d.s };
 }
 function makeProd(o) {
-  const p = { id: uid(), name: o.name, d: o.d || null, t: o.t, c: o.c || "#C9B79A", cell: o.cell || "round", zone: o.zone, l: o.l == null ? 1 : o.l, have: o.have, max: o.max, exp: o.exp || null, added: today() };
+  const p = { id: uid(), name: o.name, d: o.d || null, t: o.t, c: o.c || "#C9B79A", cell: o.cell || "round", zone: o.zone, l: o.l == null ? 1 : o.l, have: o.have, max: o.max, exp: o.exp || null, added: today(), packs: Math.max(1, Math.round(o.packs || 1)), pk: o.pk || null, u: o.u || "г" };
   if (p.t === "count") { p.have = o.have == null ? 1 : o.have; p.max = Math.max(p.have, o.max || p.have); }
   return p;
 }
@@ -143,7 +152,7 @@ function tileHTML(p, o) {
   const st = pStatus(p);
   return '<button class="tile' + (o.dim ? " dim" : "") + (o.sel ? " sel" : "") + '" data-a="' + (o.act || "prod") + '" data-id="' + esc(o.id || p.id) + '" aria-label="' + esc(p.name + ", " + (o.aria || STL[st])) + '">' +
     '<span style="width:52px;height:52px;display:flex;align-items:center;justify-content:center">' + pViz(p, 52) + "</span>" +
-    '<span class="nm">' + esc(p.name) + "</span>" + (o.noDot ? "" : '<span class="tdot st-' + st + '"></span>') + "</button>";
+    '<span class="nm">' + esc(p.name) + "</span>" + ((p.packs || 1) > 1 && p.t !== "count" ? '<span class="pkb">×' + p.packs + "</span>" : "") + (o.noDot ? "" : '<span class="tdot st-' + st + '"></span>') + "</button>";
 }
 function plateBG(cols, size) {
   cols = cols.length ? cols : ["#F1E8DC"];
@@ -214,7 +223,8 @@ function shProd(sh) {
   h += '<div class="kv"><div><p class="k">Осталось</p><p class="v">' + leftText(p) + '</p></div><div><p class="k">Срок</p><p class="v" style="font-size:14px">' + expLabel(p) + "</p></div></div>";
   if (p.t === "count") h += '<div class="stepper"><button data-a="pCount" data-v="-1" aria-label="Минус один">−</button><span>' + p.have + " из " + p.max + '</span><button class="plus" data-a="pCount" data-v="1" aria-label="Плюс один">+</button></div>';
   else if (p.t !== "can") h += '<div class="lv">' + [[0.1, "Почти нет"], [0.35, "Мало"], [0.6, "Половина"], [1, "Полная"]].map((o) => '<button class="' + (Math.abs((p.l || 0) - o[0]) < 0.13 ? "on" : "") + '" data-a="pLevel" data-v="' + o[0] + '">' + o[1] + "</button>").join("") + "</div>";
-  h += '<label class="lbl">Годен до<input class="in" type="date" id="pExp" data-ch="pExp" value="' + (p.exp || "") + '"></label><div class="chips">' + [["3", "+3 дня"], ["7", "+неделя"], ["30", "+месяц"], ["", "Без срока"]].map((o) => '<button class="chip" data-a="pExpQuick" data-v="' + o[0] + '">' + o[1] + "</button>").join("") + "</div>";
+  if (p.t !== "count") h += '<div class="row"><span style="flex:1;font-size:14px;font-weight:800">' + (p.t === "can" ? "Банок" : "Упаковок, считая открытую") + '</span><button class="chip" style="min-width:44px" data-a="pPacks" data-v="-1" aria-label="Меньше">−</button><span style="min-width:28px;text-align:center;font-size:16px;font-weight:800">' + (p.packs || 1) + '</span><button class="chip" style="min-width:44px;background:var(--yel);border-color:var(--yelb)" data-a="pPacks" data-v="1" aria-label="Больше">+</button></div>';
+  h += '<label class="lbl">Годен до (нажми, чтобы выбрать дату в календаре)<input class="in" type="date" id="pExp" data-ch="pExp" value="' + (p.exp || "") + '"></label><div class="chips">' + [["3", "+3 дня"], ["7", "+неделя"], ["30", "+месяц"], ["", "Без срока"]].map((o) => '<button class="chip" data-a="pExpQuick" data-v="' + o[0] + '">' + o[1] + "</button>").join("") + "</div>";
   if (p.d) {
     const recs = S.recs.filter((r) => r.ings.some((i) => i.d && (i.d === p.d || (DICT[p.d] && DICT[p.d].ref === i.d))));
     if (recs.length || (d && d.slot)) {
@@ -228,6 +238,7 @@ function shProd(sh) {
   else if (p.d && DICT[p.d] && p.name !== DICT[p.d].n && !DICT[p.d].ref) h += '<p class="small muted" style="margin:0">Учитывается как «' + esc(DICT[p.d].n) + '» · <button class="chip" style="min-height:30px;padding:0 8px;font-size:12px" data-a="pLink" data-v="' + p.d + '">отвязать</button></p>';
   h += '<details><summary>Изменить название, место или тару ›</summary><div style="display:flex;flex-direction:column;gap:10px;padding-top:6px">';
   h += '<label class="lbl">Название<input class="in" id="pName" data-in="pName" value="' + esc(p.name) + '"></label>';
+  if (p.t !== "count") h += '<div class="lbl">В одной целой упаковке</div><div class="row"><input class="in" style="width:120px" type="number" inputmode="decimal" id="pPk" data-ch="pPk" value="' + (p.pk || "") + '" placeholder="например 300">' + ["г", "мл", "шт"].map((x) => '<button class="chip' + ((p.u || "г") === x ? " on" : "") + '" data-a="pU" data-v="' + x + '">' + x + "</button>").join("") + "</div>";
   h += '<div class="lbl">Где лежит</div><div class="hscroll">' + S.zones.slice().sort((a, b) => PLACES.findIndex((x) => x.id === a.place) - PLACES.findIndex((x) => x.id === b.place) || a.o - b.o).map((zz) => '<button class="chip' + (zz.id === p.zone ? " on" : "") + '" data-a="pZone" data-v="' + zz.id + '">' + esc(zoneLabel(zz)) + "</button>").join("") + "</div>";
   h += '<div class="lbl">Тара</div><div class="hscroll">' + TARA.map((t) => '<div style="flex:none">' + tileHTML({ name: t[1], t: t[0], c: p.c, l: 0.7, have: 3, max: 4, cell: p.cell }, { act: "pTara", id: t[0], noDot: true, sel: p.t === t[0], aria: "тара" }) + "</div>").join("") + "</div></div></details>";
   const inShop = S.shop.some((x) => !x.done && (x.pid === p.id || (p.d && x.d === p.d)));
@@ -270,7 +281,7 @@ function addSuggHTML(sh) {
 function shAdd(sh) {
   let h = '<div class="between"><h2>Новый продукт</h2><button class="ibtn" data-a="close" aria-label="Закрыть">' + ICON.x + "</button></div>";
   h += '<label class="lbl">Что добавить<input class="in" id="addQ" data-in="addQ" type="text" autocomplete="off" placeholder="Начни печатать: молоко, тофу…" value="' + esc(sh.q || "") + '"></label>';
-  if (!sh.pick) return h + '<div id="addSugg" style="display:flex;flex-direction:column;gap:6px">' + addSuggHTML(sh) + "</div>";
+  if (!sh.pick) return h + (aiOn() ? '<label class="btn" style="background:#EEEAF6;border-color:#D8D0EC;cursor:pointer;gap:8px">' + ICON.camera + 'По фото: упаковка или целая полка<input type="file" accept="image/*" data-ch="photo" style="display:none"></label>' : "") + '<div id="addSugg" style="display:flex;flex-direction:column;gap:6px">' + addSuggHTML(sh) + "</div>";
   const d = sh.pick;
   const L = sh.link && DICT[sh.link] ? DICT[sh.link] : null;
   const prev = { name: d.n, t: sh.tara, c: d.c, l: sh.level, have: sh.have, max: sh.have, cell: d.cell || "round" };
@@ -278,10 +289,14 @@ function shAdd(sh) {
   if (d.custom) h += linkHTML(d.n, sh.link, "addLink");
   h += '<div class="lbl">Тара — ' + (sh.tara === sh.taraDef ? "подобрана по справочнику" : "выбрана вручную, запомню") + '</div><div class="hscroll">' + TARA.map((t) => '<div style="flex:none">' + tileHTML({ name: t[1], t: t[0], c: d.c, l: 0.7, have: 3, max: 4, cell: d.cell || "round" }, { act: "addTara", id: t[0], noDot: true, sel: sh.tara === t[0], aria: "тара" }) + "</div>").join("") + "</div>";
   h += '<div class="lbl">Куда положить</div><div class="hscroll">' + S.zones.slice().sort((a, b) => PLACES.findIndex((x) => x.id === a.place) - PLACES.findIndex((x) => x.id === b.place) || a.o - b.o).map((z) => '<button class="chip' + (z.id === sh.zone ? " on" : "") + '" data-a="addZone" data-v="' + z.id + '">' + esc(zoneLabel(z)) + "</button>").join("") + "</div>";
-  h += '<div class="lbl">Сколько</div>';
+  h += '<div class="lbl">' + (sh.tara === "count" ? "Сколько штук" : sh.tara === "can" ? "" : "Сколько в открытой (или единственной) упаковке") + "</div>";
   if (sh.tara === "count") h += '<div class="stepper"><button data-a="addCount" data-v="-1">−</button><span>' + sh.have + ' шт.</span><button class="plus" data-a="addCount" data-v="1">+</button></div>';
   else if (sh.tara !== "can") h += '<div class="lv">' + [[0.1, "Почти нет"], [0.35, "Мало"], [0.6, "Половина"], [1, "Полная"]].map((o) => '<button class="' + (Math.abs(sh.level - o[0]) < 0.13 ? "on" : "") + '" data-a="addLevel" data-v="' + o[0] + '">' + o[1] + "</button>").join("") + "</div>";
-  h += '<div class="lbl">Хранить примерно' + (sh.srokDef ? " — по справочнику " + sh.srokDef + " " + plural(sh.srokDef, "день", "дня", "дней") : "") + '</div><div class="chips">' + SROK.map((s) => '<button class="chip' + (sh.srok === s[0] ? " on" : "") + '" data-a="addSrok" data-v="' + s[0] + '">' + s[1] + "</button>").join("") + "</div>";
+  if (sh.tara !== "count") {
+    h += '<div class="row"><span style="flex:1;font-size:14px;font-weight:800">' + (sh.tara === "can" ? "Сколько банок" : "Сколько упаковок") + '</span><button class="chip" style="min-width:44px" data-a="addPacks" data-v="-1" aria-label="Меньше">−</button><span style="min-width:28px;text-align:center;font-size:16px;font-weight:800">' + sh.packs + '</span><button class="chip" style="min-width:44px;background:var(--yel);border-color:var(--yelb)" data-a="addPacks" data-v="1" aria-label="Больше">+</button></div>';
+    h += '<div class="lbl">В одной целой упаковке' + (sh.pkDef ? " — обычно " + fmtQ(sh.pkDef, sh.u) : "") + '</div><div class="row"><input class="in" style="width:120px" type="number" inputmode="decimal" id="addPk" data-in="addPk" value="' + (sh.pk || "") + '" placeholder="вес или объём">' + ["г", "мл", "шт"].map((x) => '<button class="chip' + (sh.u === x ? " on" : "") + '" data-a="addU" data-v="' + x + '">' + x + "</button>").join("") + "</div>";
+  }
+  h += '<div class="lbl">Годен до' + (sh.srokDef ? " — по справочнику хранится " + sh.srokDef + " " + plural(sh.srokDef, "день", "дня", "дней") : "") + '</div><input class="in" type="date" id="addExp" data-ch="addExp" value="' + (sh.exp || "") + '"><div class="chips">' + SROK.map((s) => '<button class="chip' + (sh.srok === s[0] ? " on" : "") + '" data-a="addSrok" data-v="' + s[0] + '">' + (s[0] ? "+" + s[1].toLowerCase() : s[1]) + "</button>").join("") + "</div>";
   h += '<button class="btn acc" data-a="addCommit">Положить · ' + esc(zoneLabel(zoneById(sh.zone)).toLowerCase()) + "</button>";
   return h;
 }
@@ -664,10 +679,54 @@ function shAiRec(sh) {
   return h;
 }
 
+
+/* ---------- добавление по фото ---------- */
+function fileToJpeg(file, max) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(img.src); res(c.toDataURL("image/jpeg", 0.85).split(",")[1]); };
+    img.onerror = () => rej(new Error("Не получилось открыть фото"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+function photoStart(file) {
+  const sh = { type: "photo", busy: true, items: [], err: "" }; ui.sheet = sh; render();
+  fileToJpeg(file, 1600).then((b64) => aiCall({ task: "photo", image: b64, known: DICT_LIST.filter((x) => !x.virtual && !x.ai).map((x) => [x.id, x.n]) })).then((r) => {
+    sh.busy = false;
+    sh.items = (r && Array.isArray(r.items) ? r.items : []).slice(0, 30).map((it) => {
+      const same = it.same && DICT[it.same] && !DICT[it.same].virtual ? it.same : null;
+      const base = same ? DICT[same] : null;
+      const t = base ? dictDefaults(base).t : (TARA_IDS.indexOf(it.t) >= 0 ? it.t : "jar");
+      const zone = base ? dictDefaults(base).z : zoneForPlace(it.place, it.cat);
+      const exp = /^\d{4}-\d{2}-\d{2}$/.test(it.exp || "") ? it.exp : null;
+      const s = base ? base.s : num(it.s, 7);
+      return { on: true, raw: it, name: cap(String(it.name || "Продукт").slice(0, 60)), same: same, t: t, zone: zone, count: Math.max(1, Math.min(30, Math.round(num(it.count, 1) || 1))), pk: num(it.pk, 0) || (base && base.pk) || null, u: ["г", "мл", "шт"].indexOf(it.u) >= 0 ? it.u : (base && base.u) || "г", exp: exp || (s && s < 999 ? addDays(today(), s) : null), expSeen: !!exp };
+    });
+    if (ui.sheet === sh) render();
+  }, (e) => { sh.busy = false; sh.err = e.message; if (ui.sheet === sh) render(); });
+}
+function shPhoto(sh) {
+  let h = '<div class="between"><h2>Продукты с фото</h2><button class="ibtn" data-a="close" aria-label="Закрыть">' + ICON.x + "</button></div>";
+  if (sh.busy) return h + '<div class="empty"><h3>Читаю надписи на упаковках…</h3><p class="p">Обычно 10–30 секунд.</p></div>';
+  if (sh.err) return h + '<p class="p" style="color:#C2452F">' + esc(sh.err) + '</p><label class="btn" style="cursor:pointer">Попробовать другое фото<input type="file" accept="image/*" data-ch="photo" style="display:none"></label>';
+  if (!sh.items.length) return h + '<div class="empty"><h3>Не нашла продуктов</h3><p class="p">Я распознаю продукты по надписям на упаковках. Попробуй сфотографировать ближе и ровнее, чтобы название читалось.</p></div><label class="btn" style="cursor:pointer">Другое фото<input type="file" accept="image/*" data-ch="photo" style="display:none"></label>';
+  h += '<p class="p">Проверь и поправь, если нужно. Сняла галочку — не добавлю.</p>';
+  sh.items.forEach((it, i) => {
+    const z = zoneById(it.zone);
+    h += '<div class="card" style="padding:10px;gap:8px' + (it.on ? "" : ";opacity:.5") + '"><div class="row" style="gap:10px"><input type="checkbox" aria-label="Добавить этот продукт" data-ch="phOn" data-i="' + i + '"' + (it.on ? " checked" : "") + ' style="width:22px;height:22px;accent-color:#4E9A64;flex:none"><input class="in" style="min-height:40px;font-size:15px" id="phN' + i + '" data-in="phName" data-i="' + i + '" value="' + esc(it.name) + '"></div>';
+    h += '<div class="small muted" style="font-weight:700">' + esc(zoneLabel(z)) + (it.pk ? " · " + fmtQ(it.pk, it.u) + " в упаковке" : "") + (it.same ? " · как «" + esc(DICT[it.same].n) + "»" : " · новый продукт") + "</div>";
+    h += '<div class="row" style="flex-wrap:wrap"><span class="small">Упаковок</span><button class="chip" style="min-height:34px;padding:0 10px" data-a="phCount" data-i="' + i + '" data-v="-1">−</button><span style="font-weight:800">' + it.count + '</span><button class="chip" style="min-height:34px;padding:0 10px" data-a="phCount" data-i="' + i + '" data-v="1">+</button><span class="small" style="margin-left:8px">до</span><input type="date" class="in" style="width:auto;min-height:36px;font-size:14px;padding:0 8px" data-ch="phExp" data-i="' + i + '" value="' + (it.exp || "") + '"></div>' + (it.expSeen ? '<span class="small" style="color:#3E7A52">Дату взяла с упаковки</span>' : "") + "</div>";
+  });
+  const n = sh.items.filter((x) => x.on).length;
+  h += '<button class="btn acc" data-a="phCommit"' + (n ? "" : " disabled") + ">Положить выбранные (" + n + ")</button>";
+  h += '<p class="small soft" style="margin:0;font-weight:600">Овощи и продукты без надписей на фото не видны — их добавь вручную.</p>';
+  return h;
+}
+
 /* ---------- «Приготовила» ---------- */
 function openCook(o) {
   const upd = {};
-  (o.uses || []).forEach((u) => { const p = prodFor(u.d); if (!p || upd[p.id]) return; if (p.t === "count") { const guess = u.d === "eggs" ? Math.max(1, Math.round((u.g || 50) / 50)) : 1; upd[p.id] = { have: Math.max(0, p.have - guess) }; } else upd[p.id] = { l: p.l }; });
+  (o.uses || []).forEach((u) => { const p = prodFor(u.d); if (!p || upd[p.id]) return; if (p.t === "count") { const guess = u.d === "eggs" ? Math.max(1, Math.round((u.g || 50) / 50)) : 1; upd[p.id] = { have: Math.max(0, p.have - guess) }; } else if (p.pk && u.g && p.u !== "шт") upd[p.id] = { l: Math.max(0, Math.round(((p.l || 0) - u.g / p.pk) * 100) / 100), auto: true }; else upd[p.id] = { l: p.l }; });
   ui.sheet = Object.assign({ type: "cook", meal: mealByTime(), rate: null, upd: upd }, o);
   render();
 }
@@ -684,7 +743,8 @@ function shCook(sh) {
       h += '<div class="card" style="padding:8px 10px;flex-direction:row;align-items:center;gap:10px' + (u.gone ? ";opacity:.5" : "") + '"><span style="flex:none">' + pViz(pv, 44) + '</span><span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px"><span style="font-size:14px;font-weight:800">' + esc(p.name) + "</span>";
       if (u.gone) h += '<span class="small muted">закончилось</span>';
       else if (p.t === "count") h += '<span class="row"><button class="chip" style="min-height:34px;padding:0 10px" data-a="ckCount" data-id="' + pid + '" data-v="-1">−</button><span class="small">' + u.have + " из " + p.max + '</span><button class="chip" style="min-height:34px;padding:0 10px" data-a="ckCount" data-id="' + pid + '" data-v="1">+</button></span>';
-      else if (p.t !== "can") h += '<span style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px">' + [[0.1, "Нет"], [0.35, "Мало"], [0.6, "½"], [1, "Полная"]].map((o) => '<button class="chip' + (Math.abs((u.l || 0) - o[0]) < 0.13 ? " on" : "") + '" style="min-height:34px;padding:0 2px;font-size:12px" data-a="ckLevel" data-id="' + pid + '" data-v="' + o[0] + '">' + o[1] + "</button>").join("") + "</span>";
+      else if (p.t !== "can" && p.pk && u.l != null) h += '<span class="small muted">' + (u.auto ? "Списала по рецепту — " : "") + "осталось ≈ " + fmtQ(u.l * p.pk, p.u) + ((p.packs || 1) > 1 && u.l <= 0.02 ? ", открою новую упаковку" : "") + "</span>";
+      if (!u.gone && p.t !== "can" && p.t !== "count") h += '<span style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px">' + [[0.1, "Нет"], [0.35, "Мало"], [0.6, "½"], [1, "Полная"]].map((o) => '<button class="chip' + (Math.abs((u.l || 0) - o[0]) < 0.13 ? " on" : "") + '" style="min-height:34px;padding:0 2px;font-size:12px" data-a="ckLevel" data-id="' + pid + '" data-v="' + o[0] + '">' + o[1] + "</button>").join("") + "</span>";
       h += '</span><button class="chip' + (u.gone ? " on" : "") + '" style="min-height:34px;padding:0 8px;font-size:12px" data-a="ckGone" data-id="' + pid + '">' + (u.gone ? "Вернуть" : "Всё") + "</button></div>";
     });
   }
@@ -713,7 +773,7 @@ function viewHTML() { return ui.view === "builder" ? vBuilder() : ui.view === "r
 function sheetHTML() {
   const sh = ui.sheet; let body = "";
   if (sh.type === "prod") body = shProd(sh); else if (sh.type === "add") body = shAdd(sh); else if (sh.type === "cook") body = shCook(sh);
-  else if (sh.type === "dAdd") body = shDiaryAdd(sh); else if (sh.type === "share") body = shShare(sh); else if (sh.type === "aiRec") body = shAiRec(sh);
+  else if (sh.type === "dAdd") body = shDiaryAdd(sh); else if (sh.type === "share") body = shShare(sh); else if (sh.type === "aiRec") body = shAiRec(sh); else if (sh.type === "photo") body = shPhoto(sh);
   else if (sh.type === "saveRec") body = '<h2>Сохранить рецепт</h2><label class="lbl">Название<input class="in" id="srName" data-in="srName" value="' + esc(sh.name) + '"></label><div class="btns"><button class="btn" data-a="close">Отмена</button><button class="btn acc" data-a="srSave">Сохранить</button></div>';
   else if (sh.type === "gone") body = "<h2>" + esc(sh.name) + ' закончилось</h2><p class="p">Добавить в список покупок?</p><div class="btns"><button class="btn" data-a="close">Нет</button><button class="btn acc" data-a="goneShop">Да, в закупки</button></div>';
   else if (sh.type === "confirm") body = "<h2>" + esc(sh.title) + '</h2><p class="p">' + esc(sh.text) + '</p><div class="btns"><button class="btn" data-a="close">Отмена</button><button class="btn acc" data-a="confirmYes">' + esc(sh.yes) + "</button></div>";
@@ -749,32 +809,50 @@ const A = {
   pZone(d) { const p = prodById(ui.sheet.id); p.zone = d.v; if (p.d) learn(p.d, { z: d.v }); commit(); toast("Переложила: " + zoneLabel(zoneById(d.v))); },
   pTara(d) { const p = prodById(ui.sheet.id); const t = d.id; if (t === p.t) return; if (t === "count") { p.have = p.have || 1; p.max = p.max || p.have; } p.t = t; if (p.d) learn(p.d, { t: t }); commit(); },
   pShop() { const p = prodById(ui.sheet.id); const ex = S.shop.find((x) => !x.done && (x.pid === p.id || (p.d && x.d === p.d))); if (ex) S.shop.splice(S.shop.indexOf(ex), 1); else shopAdd({ name: p.name, d: p.d, pid: p.id, cat: p.d && DICT[p.d] ? DICT[p.d].cat : "other", why: [["low", "заканчивается"]] }); commit(); },
-  pGone() { const p = prodById(ui.sheet.id); S.prods.splice(S.prods.indexOf(p), 1); const inShop = S.shop.some((x) => !x.done && (x.pid === p.id || (p.d && x.d === p.d))); ui.sheet = inShop ? null : { type: "gone", name: p.name, d: p.d }; commit(); },
+  pPacks(d) { const p = prodById(ui.sheet.id); p.packs = Math.max(1, Math.min(50, (p.packs || 1) + Number(d.v))); commit(); },
+  pU(d) { const p = prodById(ui.sheet.id); p.u = d.v; commit(); },
+  pGone() { const p = prodById(ui.sheet.id); if (p.t !== "count" && (p.packs || 1) > 1) { p.packs -= 1; p.l = 1; commit(); toast("Открыла новую упаковку · всего осталось " + p.packs); return; } S.prods.splice(S.prods.indexOf(p), 1); const inShop = S.shop.some((x) => !x.done && (x.pid === p.id || (p.d && x.d === p.d))); ui.sheet = inShop ? null : { type: "gone", name: p.name, d: p.d }; commit(); },
   goneShop() { const sh = ui.sheet; shopAdd({ name: sh.name, d: sh.d, why: [["low", "закончилось"]] }); ui.sheet = null; commit(); toast("Добавила в закупки: " + sh.name); },
   add(d) { ui.sheet = { type: "add", q: "", pick: null, preset: d.z || null }; render(); setTimeout(() => { const i = $("#addQ"); if (i) i.focus(); }, 60); },
   addPick(d) { const sh = ui.sheet; const u0 = d.v.indexOf("uc:") === 0 ? learned(d.v) : null; const dd = u0 ? { id: d.v, n: u0.name, t: u0.t, c: u0.c, z: u0.z, cell: u0.cell, custom: true } : DICT[d.v]; const L = u0 && u0.link && DICT[u0.link] ? DICT[u0.link] : null; const df = dd.custom ? { t: dd.t, z: dd.z, n0: L ? (L.n0 || 1) : 1, s: L ? L.s : 0 } : dictDefaults(dd);
-    Object.assign(sh, { pick: dd, link: L ? L.id : null, q: dd.n, tara: df.t, taraDef: df.t, zone: sh.preset || df.z, level: 1, have: df.n0 || 1, srok: nearestSrok(df.s), srokDef: df.s && df.s < 999 ? df.s : 0 }); render(); },
-  addLink(d) { const sh = ui.sheet; if (sh.link === d.v) { sh.link = null; render(); return; } sh.link = d.v; const df = dictDefaults(DICT[d.v]); Object.assign(sh, { tara: df.t, taraDef: df.t, zone: sh.preset || df.z, have: df.n0 || 1, srok: nearestSrok(df.s), srokDef: df.s && df.s < 999 ? df.s : 0 }); if (df.cell) sh.pick.cell = df.cell; if (!sh.pick.c || sh.pick.c === "#C9B79A") sh.pick.c = DICT[d.v].c; render(); },
+    const PK = L || (dd.custom ? null : dd); const sr = nearestSrok(df.s);
+    Object.assign(sh, { pick: dd, link: L ? L.id : null, q: dd.n, tara: df.t, taraDef: df.t, zone: sh.preset || df.z, level: 1, have: df.n0 || 1, srok: sr, exp: df.s && df.s < 999 ? addDays(today(), df.s) : (sr ? addDays(today(), sr) : null), srokDef: df.s && df.s < 999 ? df.s : 0, packs: 1, pk: (u0 && u0.pk) || (PK && PK.pk) || null, pkDef: PK && PK.pk || 0, u: (u0 && u0.u) || (PK && PK.u) || "г" }); render(); },
+  addLink(d) { const sh = ui.sheet; if (sh.link === d.v) { sh.link = null; render(); return; } sh.link = d.v; const df = dictDefaults(DICT[d.v]); Object.assign(sh, { tara: df.t, taraDef: df.t, zone: sh.preset || df.z, have: df.n0 || 1, srok: nearestSrok(df.s), exp: df.s && df.s < 999 ? addDays(today(), df.s) : null, srokDef: df.s && df.s < 999 ? df.s : 0, pk: sh.pk || DICT[d.v].pk || null, pkDef: DICT[d.v].pk || 0, u: DICT[d.v].u || sh.u }); if (df.cell) sh.pick.cell = df.cell; if (!sh.pick.c || sh.pick.c === "#C9B79A") sh.pick.c = DICT[d.v].c; render(); },
   pLink(d) { const p = prodById(ui.sheet.id); p.d = p.d === d.v ? null : d.v; if (p.d) { learnLink(p.name, p.d); if (DICT[p.d].cell && p.t === "count") p.cell = DICT[p.d].cell; } commit(); },
   aiProduct() { aiProduct(); },
+  phCount(d) { const it = ui.sheet.items[Number(d.i)]; it.count = Math.max(1, Math.min(30, it.count + Number(d.v))); render(); },
+  phCommit() {
+    const sh = ui.sheet; const added = [];
+    sh.items.filter((x) => x.on).forEach((it) => {
+      const id = it.same || aiSaveProduct(it.name, it.raw);
+      const dd = DICT[id];
+      const t = it.t === "count" || dd.t === "count" ? "count" : it.t;
+      S.prods.push(makeProd({ name: it.name, d: id, t: t, c: dd.c, cell: dd.cell, zone: it.zone, l: 1, have: t === "count" ? (dd.n0 || 1) * it.count : undefined, max: t === "count" ? (dd.n0 || 1) * it.count : undefined, exp: it.exp, packs: t === "count" ? 1 : it.count, pk: t === "count" ? null : it.pk, u: it.u }));
+      added.push(it.name + (it.count > 1 ? " ×" + it.count : ""));
+    });
+    ui.sheet = null; ui.view = "storage"; commit(); toast("Положила: " + added.join(", "));
+  },
   aiRec() { ui.sheet = { type: "aiRec", wish: "", mode: ui.view === "builder" && ui.b.mode === "ideas" ? "ideas" : "stock" }; render(); },
   aiMode(d) { ui.sheet.mode = d.v; render(); },
   aiGo() { aiRecipe(); },
   aiSave() { const r = ui.sheet.res; if (!r) return; S.recs.unshift(aiToRecipe(r)); ui.sheet.saved = true; commit(); toast("Сохранила в рецепты: " + r.name); },
   aiBuild() { const r = ui.sheet.res; ui.b.name = r.name; ui.b.items = r.ings.filter((i) => i.d && i.g && DICT[i.d] && DICT[i.d].slot).map((i) => ({ d: i.d, g: i.g })); ui.b.mode = "ideas"; ui.view = "builder"; ui.sheet = null; render(); },
-  addCustom() { const sh = ui.sheet, q = sh.q.trim(); const name = cap(q); Object.assign(sh, { pick: { id: "uc:" + q.toLowerCase(), n: name, t: "jar", c: "#C9B79A", custom: true }, q: name, tara: "jar", taraDef: "jar", zone: sh.preset || "f1", level: 1, have: 1, srok: 7, srokDef: 0 }); render(); },
+  addCustom() { const sh = ui.sheet, q = sh.q.trim(); const name = cap(q); Object.assign(sh, { pick: { id: "uc:" + q.toLowerCase(), n: name, t: "jar", c: "#C9B79A", custom: true }, q: name, tara: "jar", taraDef: "jar", zone: sh.preset || "f1", level: 1, have: 1, srok: 7, exp: addDays(today(), 7), srokDef: 0, packs: 1, pk: null, pkDef: 0, u: "г" }); render(); },
   addTara(d) { const sh = ui.sheet; sh.tara = d.id; if (d.id === "count" && !sh.have) sh.have = 1; render(); },
   addZone(d) { ui.sheet.zone = d.v; render(); },
   addLevel(d) { ui.sheet.level = Number(d.v); render(); },
   addCount(d) { ui.sheet.have = Math.max(1, Math.min(30, ui.sheet.have + Number(d.v))); render(); },
-  addSrok(d) { ui.sheet.srok = Number(d.v); render(); },
+  addSrok(d) { const v = Number(d.v); ui.sheet.srok = v; ui.sheet.exp = v ? addDays(today(), v) : null; render(); },
+  addPacks(d) { ui.sheet.packs = Math.max(1, Math.min(50, ui.sheet.packs + Number(d.v))); render(); },
+  addU(d) { ui.sheet.u = d.v; render(); },
   addCommit() {
     const sh = ui.sheet, dd = sh.pick;
-    const p = makeProd({ name: dd.n, d: dd.custom ? null : dd.id, t: sh.tara, c: dd.c, cell: dd.cell, zone: sh.zone, l: sh.level, have: sh.have, max: sh.have, exp: sh.srok ? addDays(today(), sh.srok) : null });
+    const p = makeProd({ name: dd.n, d: dd.custom ? null : dd.id, t: sh.tara, c: dd.c, cell: dd.cell, zone: sh.zone, l: sh.level, have: sh.have, max: sh.have, exp: sh.exp || null, packs: sh.tara === "count" ? 1 : sh.packs, pk: sh.tara === "count" ? null : sh.pk, u: sh.u });
     S.prods.push(p);
     if (sh.link) { p.d = sh.link; }
     if (dd.custom) learnCustom(dd, sh); else { const df = dictDefaults(dd); if (sh.tara !== df.t || (!sh.preset && sh.zone !== df.z)) learn(dd.id, { t: sh.tara, z: sh.zone }); }
-    const z = zoneById(sh.zone); ui.place = z.place; ui.view = "storage"; ui.sheet = null; commit(); toast("Положила: " + p.name + " → " + zoneLabel(z).toLowerCase());
+    if (dd.custom && sh.pk) { const u = learned("uc:" + dd.n.toLowerCase()); if (u) { u.pk = sh.pk; u.u = sh.u; } }
+    const z = zoneById(sh.zone); ui.place = z.place; ui.view = "storage"; ui.sheet = null; commit(); toast("Положила: " + p.name + (p.packs > 1 ? " ×" + p.packs : "") + " → " + zoneLabel(z).toLowerCase());
   },
   sample() { loadSample(); },
   /* конструктор */
@@ -812,13 +890,14 @@ const A = {
   ckMeal(d) { ui.sheet.meal = d.v; render(); },
   ckRate(d) { ui.sheet.rate = ui.sheet.rate === d.v ? null : d.v; render(); },
   ckCount(d) { const u = ui.sheet.upd[d.id], p = prodById(d.id); u.have = Math.max(0, Math.min(p.max, u.have + Number(d.v))); render(); },
-  ckLevel(d) { ui.sheet.upd[d.id].l = Number(d.v); render(); },
+  ckLevel(d) { const u = ui.sheet.upd[d.id]; u.l = Number(d.v); u.auto = false; render(); },
   ckGone(d) { const u = ui.sheet.upd[d.id]; u.gone = !u.gone; render(); },
   ckSave() {
     const sh = ui.sheet;
     S.diary.push({ id: uid(), date: today(), meal: sh.meal, time: nowHM(), name: sh.name, kcal: sh.kcal || 0, p: sh.p || 0, cols: sh.cols || [], ings: sh.ings || "", ds: sh.ds || [], rate: sh.rate || "none", src: sh.src || "", t: Date.now() });
     const gone = [];
-    Object.keys(sh.upd).forEach((pid) => { const p = prodById(pid), u = sh.upd[pid]; if (!p) return; if (u.gone || (p.t === "count" && u.have <= 0)) { S.prods.splice(S.prods.indexOf(p), 1); gone.push(p); } else { if (u.have != null) p.have = u.have; if (u.l != null) p.l = u.l; } });
+    Object.keys(sh.upd).forEach((pid) => { const p = prodById(pid), u = sh.upd[pid]; if (!p) return; if (!u.gone && p.t !== "count" && (p.packs || 1) > 1 && u.l != null && u.l <= 0.02) { p.packs -= 1; p.l = 1; return; }
+      if (u.gone || (p.t === "count" && u.have <= 0) || (p.t !== "count" && p.t !== "can" && u.l != null && u.l <= 0.02)) { S.prods.splice(S.prods.indexOf(p), 1); gone.push(p); } else { if (u.have != null) p.have = u.have; if (u.l != null) p.l = u.l; } });
     if (sh.recId && sh.rate) { const r = S.recs.find((x) => x.id === sh.recId); if (r) r.rating = sh.rate; }
     gone.forEach((p) => shopAdd({ name: p.name, d: p.d, why: [["low", "закончилось"]] }));
     ui.sheet = null; commit(); toast("Записала в дневник" + (gone.length ? ". Закончилось и ушло в закупки: " + gone.map((p) => p.name.toLowerCase()).join(", ") : ""));
@@ -843,9 +922,10 @@ const A = {
       if (d) {
         const df = dictDefaults(d);
         const ex = S.prods.find((p) => p.d === d.id && (p.t === "jar" || p.t === "bag" || p.t === "bottle" || p.t === "count"));
-        if (ex && ex.t !== "count") { ex.l = 1; ex.exp = df.s && df.s < 999 ? addDays(today(), df.s) : ex.exp; placed.push(ex.name + " (долила)"); }
+        if (ex && ex.t !== "count" && zoneById(ex.zone).place === "pantry" && ex.t === "jar") { ex.l = 1; placed.push(ex.name + " (досыпала)"); }
+        else if (ex && ex.t !== "count") { ex.packs = (ex.packs || 1) + 1; placed.push(ex.name + " (+1 уп.)"); }
         else if (ex && ex.t === "count") { ex.have += df.n0 || 1; ex.max = Math.max(ex.max, ex.have); ex.exp = df.s && df.s < 999 ? addDays(today(), df.s) : ex.exp; placed.push(ex.name); }
-        else { S.prods.push(makeProd({ name: d.n, d: d.id, t: df.t, c: d.c, cell: d.cell, zone: df.z, l: 1, have: df.n0, max: df.n0, exp: df.s && df.s < 999 ? addDays(today(), df.s) : null })); placed.push(d.n); }
+        else { S.prods.push(makeProd({ name: d.n, d: d.id, t: df.t, c: d.c, cell: d.cell, zone: df.z, l: 1, have: df.n0, max: df.n0, exp: df.s && df.s < 999 ? addDays(today(), df.s) : null, pk: d.pk, u: d.u })); placed.push(d.n); }
       } else { S.prods.push(makeProd({ name: x.name, t: "jar", zone: "f1", l: 1 })); placed.push(x.name + " (на полку 1 — переложи)"); }
     });
     S.shop = S.shop.filter((x) => !x.done); commit(); toast("Разложила: " + placed.join(", ") + ". Проверь сроки на упаковках.");
@@ -871,12 +951,19 @@ const IN = {
   daName(v) { ui.sheet.name = v; }, daK(v) { ui.sheet.k = v; }, daP(v) { ui.sheet.p = v; },
   shDraft(v) { ui.sh.draft = v; },
   aiWish(v) { if (ui.sheet) ui.sheet.wish = v; },
+  phName(v, el) { const it = ui.sheet.items[Number(el.dataset.i)]; if (it) it.name = v; },
   prefs(v) { let u = S.udict.find((x) => x.id === "prefs"); if (!u) { u = { id: "prefs" }; S.udict.push(u); } u.text = v; clearTimeout(IN.t); IN.t = setTimeout(() => commit(true), 800); }
 };
 const CH = {
   pExp(v) { const p = prodById(ui.sheet.id); p.exp = v || null; commit(); },
+  pPk(v) { const p = prodById(ui.sheet.id); const n = parseFloat(String(v).replace(",", ".")); p.pk = isFinite(n) && n > 0 ? n : null; commit(); },
+  addExp(v) { const sh = ui.sheet; sh.exp = v || null; sh.srok = v ? -1 : 0; render(); },
+  addPk(v) { const sh = ui.sheet; const n = parseFloat(String(v).replace(",", ".")); sh.pk = isFinite(n) && n > 0 ? n : null; },
   bG(v, el) { const x = ui.b.items.find((y) => y.d === el.dataset.v); if (x) { const n = parseInt(v, 10); x.g = isNaN(n) ? 0 : Math.max(0, Math.min(2000, n)); render(); } },
   shDone(v, el) { const x = S.shop.find((y) => y.id === el.dataset.id); if (x) { x.done = el.checked; commit(); } },
+  photo(v, el) { const f = el.files && el.files[0]; if (f) photoStart(f); el.value = ""; },
+  phOn(v, el) { const it = ui.sheet.items[Number(el.dataset.i)]; it.on = el.checked; render(); },
+  phExp(v, el) { const it = ui.sheet.items[Number(el.dataset.i)]; it.exp = v || null; it.expSeen = false; },
   importJSON(v, el) { const f = el.files && el.files[0]; if (!f) return; f.text().then((t) => { const o = JSON.parse(t); if (!o || !Array.isArray(o.prods)) throw new Error("bad"); S = Object.assign(freshState(), o); registerAI(); commit(); toast("Копия загружена"); }).catch(() => toast("Не получилось прочитать файл")); }
 };
 function fallbackCopy(t) { const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch (e) {} ta.remove(); }
@@ -898,9 +985,9 @@ document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.
 /* ---------- пример данных ---------- */
 function loadSample() {
   const t = today();
-  const P = (d, zone, o) => { const dd = DICT[d]; const df = dictDefaults(dd); o = o || {}; return makeProd({ name: o.name || dd.n, d: d, t: o.t || df.t, c: dd.c, cell: dd.cell, zone: zone, l: o.l == null ? 1 : o.l, have: o.have == null ? df.n0 : o.have, max: o.max || df.n0, exp: o.days == null ? (dd.s && dd.s < 999 ? addDays(t, Math.min(dd.s, 40)) : null) : (o.days === false ? null : addDays(t, o.days)) }); };
+  const P = (d, zone, o) => { const dd = DICT[d]; const df = dictDefaults(dd); o = o || {}; return makeProd({ pk: dd.pk, u: dd.u, packs: o.packs, name: o.name || dd.n, d: d, t: o.t || df.t, c: dd.c, cell: dd.cell, zone: zone, l: o.l == null ? 1 : o.l, have: o.have == null ? df.n0 : o.have, max: o.max || df.n0, exp: o.days == null ? (dd.s && dd.s < 999 ? addDays(t, Math.min(dd.s, 40)) : null) : (o.days === false ? null : addDays(t, o.days)) }); };
   const list = [
-    P("curd", "f1", { have: 3, max: 3, days: 13 }), P("butter", "f1", { l: 0.7 }), P("cheese", "f1", { l: 0.45, days: 18 }),
+    P("tvorog", "f1", { t: "block", packs: 4, days: 6, name: "Творог 5%" }), P("curd", "f1", { have: 3, max: 3, days: 13 }), P("butter", "f1", { l: 0.7 }), P("cheese", "f1", { l: 0.45, days: 18 }),
     P("soup", "f2", { l: 0.6, days: 1, name: "Суп в кастрюле" }), P("corn", "f2", { days: false }),
     P("cream", "f3", { l: 0.4, days: 2 }),
     P("eggs", "f4", { have: 8, max: 10, days: 16 }), P("leftovers", "f4", { l: 0.4, days: 0 }),

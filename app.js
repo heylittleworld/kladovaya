@@ -78,16 +78,26 @@ function isEmptyP(p) { return p.t === "count" ? (p.have || 0) <= 0 : p.t !== "ca
 function leftText(p) { if (p.t === "count") return (p.have || 0) + " из " + (p.max || 0); if (p.t === "can") return "есть"; return "≈ " + Math.round((p.l || 0) * 100) + "%"; }
 function isLow(p) { return p.t === "count" ? p.max > 1 && p.have / p.max <= 0.34 : p.t !== "can" && p.l <= 0.35; }
 function matchesDict(p, id) { return p.d === id || (DICT[p.d] && DICT[p.d].ref === id); }
+const STOPW = { "консе": 1, "свежи": 1, "замор": 1, "варен": 1, "очище": 1, "порци": 1, "готов": 1, "домаш": 1, "плотн": 1, "больш": 1, "мелки": 1, "крупн": 1, "сушен": 1, "кусоч": 1, "упако": 1, "пачка": 1, "банка": 1 };
+function stems(s) { return String(s || "").toLowerCase().replace(/ё/g, "е").split(/[^a-zа-я0-9]+/).filter((w) => w.length >= 4).map((w) => w.slice(0, 5)).filter((w) => !STOPW[w]); }
+function nameMatch(a, b) { const A = stems(a), B = stems(b); return A.length > 0 && A.some((x) => B.indexOf(x) >= 0); }
+function hasProd(p, id) { const d = DICT[id]; return matchesDict(p, id) || (!p.d && d && nameMatch(p.name, d.n + " " + (d.syn || ""))); }
+function ingStatus(i) {
+  if (i.d && DICT[i.d]) { if (STAPLES[i.d]) return null; const st = stockOf(i.d); if (st !== "no") return st; }
+  const p = S.prods.find((x) => !isEmptyP(x) && nameMatch(x.name, i.n));
+  if (p) return pStatus(p) === "unknown" ? "yes" : pStatus(p);
+  return i.d && DICT[i.d] && !i.opt ? "no" : null;
+}
 function stockOf(id) {
   const d = DICT[id]; if (!d) return "no";
   if (d.virtual) return d.needs.every((n) => stockOf(n) !== "no") ? "yes" : "no";
-  const ps = S.prods.filter((p) => matchesDict(p, id) && !isEmptyP(p));
+  const ps = S.prods.filter((p) => hasProd(p, id) && !isEmptyP(p));
   if (!ps.length) return "no";
   if (ps.some((p) => pStatus(p) === "urgent")) return "urgent";
   if (ps.some((p) => pStatus(p) === "soon")) return "soon";
   return "yes";
 }
-function prodFor(id) { return S.prods.filter((p) => matchesDict(p, id) && !isEmptyP(p)).sort((a, b) => (a.exp || "9999") < (b.exp || "9999") ? -1 : 1)[0]; }
+function prodFor(id) { return S.prods.filter((p) => hasProd(p, id) && !isEmptyP(p)).sort((a, b) => (a.exp || "9999") < (b.exp || "9999") ? -1 : 1)[0]; }
 function learned(key) { return S.udict.find((u) => u.id === key); }
 function dictDefaults(d) {
   const u = learned("ud:" + d.id) || {};
@@ -214,6 +224,8 @@ function shProd(sh) {
     }
     if (d && d.note) h += '<p class="p muted" style="margin:0">' + esc(d.note) + "</p>";
   }
+  if (!p.d || (p.d && !DICT[p.d])) h += '<div style="display:flex;flex-direction:column;gap:6px">' + linkHTML(p.name, null, "pLink") + "</div>";
+  else if (p.d && DICT[p.d] && p.name !== DICT[p.d].n && !DICT[p.d].ref) h += '<p class="small muted" style="margin:0">Учитывается как «' + esc(DICT[p.d].n) + '» · <button class="chip" style="min-height:30px;padding:0 8px;font-size:12px" data-a="pLink" data-v="' + p.d + '">отвязать</button></p>';
   h += '<details><summary>Изменить название, место или тару ›</summary><div style="display:flex;flex-direction:column;gap:10px;padding-top:6px">';
   h += '<label class="lbl">Название<input class="in" id="pName" data-in="pName" value="' + esc(p.name) + '"></label>';
   h += '<div class="lbl">Где лежит</div><div class="hscroll">' + S.zones.slice().sort((a, b) => PLACES.findIndex((x) => x.id === a.place) - PLACES.findIndex((x) => x.id === b.place) || a.o - b.o).map((zz) => '<button class="chip' + (zz.id === p.zone ? " on" : "") + '" data-a="pZone" data-v="' + zz.id + '">' + esc(zoneLabel(zz)) + "</button>").join("") + "</div>";
@@ -233,6 +245,21 @@ function dictSearch(q) {
   if (!q) return ["milk", "eggs", "tofu", "cucumber", "spinach", "chickpea", "pumpkin", "lemon"].map((id) => DICT[id]);
   return pool.filter((d) => { const n = (d.n + " " + (d.syn || "")).toLowerCase(); return n.indexOf(q) === 0 || n.indexOf(" " + q) >= 0 || (q.length >= 3 && n.indexOf(q) >= 0); }).slice(0, 7);
 }
+function linkGuesses(name, excl) {
+  const out = [];
+  stems(name).forEach((st) => DICT_LIST.forEach((d) => { if (d.virtual || out.indexOf(d.id) >= 0 || d.id === excl) return; if (stems(d.n + " " + (d.syn || "")).indexOf(st) >= 0) out.push(d.id); }));
+  return out.slice(0, 6);
+}
+function linkHTML(name, cur, act, excl) {
+  const g = linkGuesses(name, excl);
+  let h = '<div class="lbl">Это то же, что… — тогда учту в рецептах, конструкторе и калориях</div><div class="chips">';
+  h += g.map((id) => '<button class="chip' + (cur === id ? " on" : "") + '" data-a="' + act + '" data-v="' + id + '">' + esc(DICT[id].n) + "</button>").join("");
+  if (aiOn()) h += '<button class="chip" style="background:#EEEAF6;border-color:#D8D0EC" data-a="aiProduct">' + (ui.sheet && ui.sheet.aiBusy ? "Распознаю…" : "Распознать с ИИ") + "</button>";
+  if (!g.length && !aiOn()) h += '<span class="small soft">Похожих в справочнике нет — продукт сохранится как свой.</span>';
+  h += "</div>";
+  if (ui.sheet && ui.sheet.aiErr) h += '<p class="small" style="color:#C2452F;margin:0">' + esc(ui.sheet.aiErr) + "</p>";
+  return h;
+}
 function addSuggHTML(sh) {
   const list = dictSearch(sh.q || "");
   let h = list.map((d) => { const df = d.custom ? d : dictDefaults(d); return '<button class="rcard" style="min-height:52px;padding:8px 12px" data-a="addPick" data-v="' + esc(d.id) + '"><span style="flex:none;width:40px;height:40px;display:flex;align-items:center;justify-content:center">' + viz(df.t, d.c, 0.7, 3, 4, d.cell, 38) + '</span><span style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-size:15px;font-weight:800">' + esc(d.n) + '</span><span class="small muted">' + esc(TARA.find((t) => t[0] === df.t)[1] + " · " + zoneLabel(zoneById(df.z))) + "</span></span>" + ICON.chev + "</button>"; }).join("");
@@ -245,8 +272,10 @@ function shAdd(sh) {
   h += '<label class="lbl">Что добавить<input class="in" id="addQ" data-in="addQ" type="text" autocomplete="off" placeholder="Начни печатать: молоко, тофу…" value="' + esc(sh.q || "") + '"></label>';
   if (!sh.pick) return h + '<div id="addSugg" style="display:flex;flex-direction:column;gap:6px">' + addSuggHTML(sh) + "</div>";
   const d = sh.pick;
+  const L = sh.link && DICT[sh.link] ? DICT[sh.link] : null;
   const prev = { name: d.n, t: sh.tara, c: d.c, l: sh.level, have: sh.have, max: sh.have, cell: d.cell || "round" };
-  h += '<div class="row" style="gap:12px;padding:8px;border-radius:18px;background:var(--bg)"><div style="flex:none">' + pViz(prev, 96) + '</div><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><p style="margin:0;font-size:18px;font-weight:800">' + esc(d.n) + "</p>" + (d.k ? '<p class="small muted" style="margin:0">≈ ' + d.k + " ккал · " + d.p + " г белка на 100 г" + (d.slot === "base" ? " (готового)" : "") + "</p>" : "") + (d.note ? '<p class="small muted" style="margin:0;font-weight:600">' + esc(d.note) + "</p>" : "") + "</div></div>";
+  h += '<div class="row" style="gap:12px;padding:8px;border-radius:18px;background:var(--bg)"><div style="flex:none">' + pViz(prev, 96) + '</div><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><p style="margin:0;font-size:18px;font-weight:800">' + esc(d.n) + "</p>" + ((L || d).k ? '<p class="small muted" style="margin:0">≈ ' + (L || d).k + " ккал · " + (L || d).p + " г белка на 100 г" + ((L || d).slot === "base" ? " (готового)" : "") + "</p>" : "") + ((L || d).note ? '<p class="small muted" style="margin:0;font-weight:600">' + esc((L || d).note) + "</p>" : "") + (L ? '<p class="small" style="margin:0;color:#3E7A52">Связан с «' + esc(L.n) + '»</p>' : "") + "</div></div>";
+  if (d.custom) h += linkHTML(d.n, sh.link, "addLink");
   h += '<div class="lbl">Тара — ' + (sh.tara === sh.taraDef ? "подобрана по справочнику" : "выбрана вручную, запомню") + '</div><div class="hscroll">' + TARA.map((t) => '<div style="flex:none">' + tileHTML({ name: t[1], t: t[0], c: d.c, l: 0.7, have: 3, max: 4, cell: d.cell || "round" }, { act: "addTara", id: t[0], noDot: true, sel: sh.tara === t[0], aria: "тара" }) + "</div>").join("") + "</div>";
   h += '<div class="lbl">Куда положить</div><div class="hscroll">' + S.zones.slice().sort((a, b) => PLACES.findIndex((x) => x.id === a.place) - PLACES.findIndex((x) => x.id === b.place) || a.o - b.o).map((z) => '<button class="chip' + (z.id === sh.zone ? " on" : "") + '" data-a="addZone" data-v="' + z.id + '">' + esc(zoneLabel(z)) + "</button>").join("") + "</div>";
   h += '<div class="lbl">Сколько</div>';
@@ -340,6 +369,7 @@ function vBuilder() {
   const pres = bPresets();
   h += '<div style="display:flex;flex-direction:column;gap:6px"><h3 style="font-size:13px">' + (ui.b.mode === "stock" ? "Быстрый старт из того, что есть" : "Идеи, ради которых стоит докупить") + '</h3><div class="hscroll">' +
     (pres.length ? pres.map((x, i) => '<button data-a="bPreset" data-v="' + i + '" style="flex:none;width:200px;min-height:76px;display:flex;flex-direction:column;justify-content:space-between;gap:6px;padding:10px 12px;border-radius:16px;text-align:left;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow)"><span style="font-size:14px;font-weight:800;line-height:1.25">' + esc(x.p.name) + '</span><span class="small" style="color:' + (x.need.length ? "#B5562A" : "#3E7A52") + '">' + (x.need.length ? "докупить: " + esc(x.need.map((id) => DICT[id].n.split(" ")[0].toLowerCase()).join(", ")) : "всё есть дома") + "</span></button>").join("") : '<p class="p soft" style="margin:0">' + (ui.b.mode === "stock" ? "Пока ни один рецепт не собирается целиком из того, что есть. Начни с основы ниже или переключись на «Идеи»." : "Всё для идей уже есть дома.") + "</p>") + "</div></div>";
+  if (aiOn()) h += '<button class="btn" style="background:#EEEAF6;border-color:#D8D0EC" data-a="aiRec">Придумать с ИИ из того, что есть</button>';
   // тарелка
   const gsum = C.parts.reduce((a, x) => a + Math.max(x.g, 12), 0); let acc = 0;
   const stops = C.parts.map((x) => { const a = acc / gsum * 360, b = (acc + Math.max(x.g, 12)) / gsum * 360; acc += Math.max(x.g, 12); return DICT[x.d].c + " " + a.toFixed(1) + "deg " + b.toFixed(1) + "deg"; });
@@ -385,10 +415,10 @@ function vBuilder() {
 }
 
 /* ==================== РЕЦЕПТЫ ==================== */
-const BADGE = { love: ["Очень понравилось", "#F7E6EA", "#8E2E45"], like: ["Нравится", "#EEF5E8", "#2F4A22"], meh: ["Не моё", "#EFEAE4", "#5E5249"], plan: ["В планах", "#E6EFF5", "#2F4250"], new: ["Новый · из конструктора", "#FDF3DC", "#6B4E12"], none: ["Ещё не оценила", "#F3EEE7", "#5E5249"] };
+const BADGE = { love: ["Очень понравилось", "#F7E6EA", "#8E2E45"], like: ["Нравится", "#EEF5E8", "#2F4A22"], meh: ["Не моё", "#EFEAE4", "#5E5249"], plan: ["В планах", "#E6EFF5", "#2F4250"], new: ["Новый", "#FDF3DC", "#6B4E12"], none: ["Ещё не оценила", "#F3EEE7", "#5E5249"] };
 const badgeHTML = (r) => { const b = BADGE[r.rating || "none"] || BADGE.none; return '<span class="tag" style="background:' + b[1] + ";color:" + b[2] + '">' + b[0] + "</span>"; };
 const STAPLES = { oil: 1, oliveoil: 1, sesameoil: 1, starch: 1, sugar: 1, flour: 1 };
-const recMissing = (r) => r.ings.filter((i) => i.d && DICT[i.d] && !DICT[i.d].virtual && !STAPLES[i.d] && stockOf(i.d) === "no");
+const recMissing = (r) => r.ings.filter((i) => i.d && DICT[i.d] && !DICT[i.d].virtual && !STAPLES[i.d] && !i.opt && ingStatus(i) === "no");
 const recCols = (r) => r.ings.filter((i) => i.d && DICT[i.d] && i.g).map((i) => DICT[i.d].c).slice(0, 6);
 const recAir = (r) => (r.tags || []).indexOf("airfryer") >= 0 || r.steps.some((s) => /Аэрогриль/.test(s[1] || ""));
 const RF = [["all", "Все"], ["fav", "Любимые"], ["light", "Лёгкий ужин"], ["protein", "Много белка"], ["airfryer", "Аэрогриль"], ["now", "Можно сейчас"]];
@@ -405,6 +435,7 @@ function vRecipes() {
   let h = hdr("Моя кулинарная книга", "Рецепты", "");
   h += '<label class="row" style="min-height:46px;padding:0 14px;border-radius:14px;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow)">' + ICON.search + '<input id="recQ" data-in="recQ" type="search" placeholder="Найти: тыква, тофу, суп…" aria-label="Поиск рецепта" value="' + esc(ui.r.q) + '" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:16px;font-weight:700"></label>';
   h += '<div class="hscroll">' + RF.map((f) => '<button class="chip' + (ui.r.filter === f[0] ? " on" : "") + '" data-a="recF" data-v="' + f[0] + '">' + f[1] + "</button>").join("") + "</div>";
+  if (aiOn()) h += '<button class="btn" style="background:#EEEAF6;border-color:#D8D0EC" data-a="aiRec">Придумать новый рецепт с ИИ</button>';
   h += '<div id="recList" style="display:flex;flex-direction:column;gap:10px">' + recListHTML() + "</div>";
   return h;
 }
@@ -414,7 +445,7 @@ function vRecipe(r) {
   h += '<div class="row" style="gap:14px"><span class="plate" style="' + plateBG(recCols(r), 104) + ';box-shadow:0 0 0 6px #F6EFE4,0 3px 10px rgba(80,55,25,.15)"></span><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">' + badgeHTML(r) + "<h2>" + esc(r.name) + "</h2></div></div>";
   h += '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">' + [[r.time + " мин", "время"], [String(r.kcal).replace("≈ ", "").replace(" на порцию", ""), "ккал ≈"], [r.p + " г", "белок"], [String(r.serv).split(" ")[0], "порции"]].map((s) => '<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:8px 4px;text-align:center"><p style="margin:0;font-size:14px;font-weight:800">' + esc(s[0]) + '</p><p class="small muted" style="margin:2px 0 0">' + s[1] + "</p></div>").join("") + "</div>";
   if (r.note) h += '<p class="p" style="padding:10px 12px;border-radius:14px;background:#E6EFF5;border:1px solid #C9DCE8;color:#2F4250">' + esc(r.note) + "</p>";
-  h += '<section class="card"><div class="between"><h3>Ингредиенты</h3><span class="small muted">' + esc(r.serv) + "</span></div>" + r.ings.map((i) => { const st = i.d && DICT[i.d] && !STAPLES[i.d] ? stockOf(i.d) : null; const dot = st === null ? "background:#D9CBB8" : st === "no" ? "border:1.5px solid #B5562A;background:#fff" : "background:#4E9A64"; return '<div class="row" style="min-height:36px;border-top:1px solid var(--line2);gap:10px"><span class="ldot" style="flex:none;box-sizing:border-box;' + dot + '"></span><span style="flex:1;font-size:14px;font-weight:700">' + esc(i.n) + '</span><span style="font-size:13px;font-weight:800;color:#4F4237">' + esc(i.q) + "</span></div>"; }).join("");
+  h += '<section class="card"><div class="between"><h3>Ингредиенты</h3><span class="small muted">' + esc(r.serv) + "</span></div>" + r.ings.map((i) => { const st = ingStatus(i); const dot = st === null ? "background:#D9CBB8" : st === "no" ? "border:1.5px solid #B5562A;background:#fff" : "background:#4E9A64"; return '<div class="row" style="min-height:36px;border-top:1px solid var(--line2);gap:10px"><span class="ldot" style="flex:none;box-sizing:border-box;' + dot + '"></span><span style="flex:1;font-size:14px;font-weight:700">' + esc(i.n) + '</span><span style="font-size:13px;font-weight:800;color:#4F4237">' + esc(i.q) + "</span></div>"; }).join("");
   if (m.length) { const allIn = m.every((i) => S.shop.some((s) => !s.done && s.d === i.d)); h += '<button class="btn ' + (allIn ? "green" : "peach") + '" data-a="recBuy">' + (allIn ? "Недостающее в закупках ✓" : "Недостающее — в закупки (" + m.length + ")") + "</button>"; }
   h += "</section>";
   h += '<section style="display:flex;flex-direction:column;gap:8px"><h3>Приготовление</h3>' + stepsHTML(r.steps.map((s) => ({ text: s[0], device: s[1], tip: s[2] }))) + "</section>";
@@ -529,6 +560,110 @@ function shShare(sh) {
   return '<h2>Поделиться списком</h2><div class="chips"><button class="chip' + (sh.notes ? " on" : "") + '" data-a="shrNotes">Пометки «для чего»</button><button class="chip' + (sh.opt ? " on" : "") + '" data-a="shrOpt">Необязательное</button></div><pre class="share">' + esc(text) + '</pre><div class="btns"><button class="btn" data-a="shrCopy">' + (sh.copied ? "Скопировано ✓" : "Скопировать") + '</button><button class="btn acc" style="flex:1.3" data-a="shrSend">Отправить…</button></div><p class="small muted" style="margin:0;font-weight:600">«Отправить» откроет меню iPhone: Telegram, WhatsApp, Сообщения, Заметки.</p>';
 }
 
+
+/* ==================== ИИ (YandexGPT через функцию в Yandex Cloud) ==================== */
+const DEFAULT_PREFS = "Не ем перец (включая болгарский), мясо и курицу. Не люблю креветки, консервированный тунец, обычный творог (только в сырниках и выпечке), греческий йогурт и кисломолочные заправки. Сыр — понемногу, не основа блюда. Люблю: большие тёплые салаты и боулы, хрустящие овощи в кукурузном крахмале, азиатские вкусы, кисло-сладкие и кунжутные заправки, запечённые овощи с румяными краями, нут, фасоль, чечевицу, эдамаме, киноа, рис, собу, яйца, рыбу (лосось, форель, треска), тыкву, крем-супы, ресторанную подачу. Хочу 80–100 г белка в день; ужин полегче — 300–450 ккал, но сытный. Техника: аэрогриль (корзина небольшая), мультиварка, индукционная плита, сковорода, блендер. Духовки нет. Готовить недолго — 15–40 минут.";
+function getPrefs() { const u = S.udict.find((x) => x.id === "prefs"); return (u && u.text) || DEFAULT_PREFS; }
+function aiOn() { return !!(window.KL_CONFIG && window.KL_CONFIG.ai); }
+async function aiCall(payload) {
+  if (!aiOn()) throw new Error("ИИ ещё не подключён — см. инструкцию.");
+  if (!SB) throw new Error("Сначала подключи сервер: ☁︎ в правом верхнем углу.");
+  let ses = null; try { ses = (await SB.auth.getSession()).data.session; } catch (e) {}
+  if (!ses) throw new Error("Чтобы пользоваться ИИ, войди: ☁︎ в правом верхнем углу.");
+  let r; try { r = await fetch(window.KL_CONFIG.ai, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + ses.access_token }, body: JSON.stringify(payload) }); } catch (e) { throw new Error("Нет связи с ИИ. Проверь интернет."); }
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || "ИИ не ответил (ошибка " + r.status + ")");
+  return j.data;
+}
+function registerAI() {
+  (S.udict || []).filter((u) => u.kind === "ai" && u.dict).forEach((u) => {
+    const d = Object.assign({}, u.dict, { id: u.id, ai: true });
+    DICT[u.id] = d; const i = DICT_LIST.findIndex((x) => x.id === u.id); if (i >= 0) DICT_LIST[i] = d; else DICT_LIST.push(d);
+  });
+}
+const TARA_IDS = TARA.map((t) => t[0]);
+const SLOT_IDS = SLOTS.map((s) => s[0]);
+const num = (v, def) => { const n = Number(v); return isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : def; };
+function zoneForPlace(place, cat) {
+  if (place === "fridge" && cat === "veg") return "fv";
+  if (place === "fridge" && cat === "protein") return "ff";
+  const z = zonesOf(PLACES.some((p) => p.id === place) ? place : "fridge")[0];
+  return z ? z.id : "f1";
+}
+function aiSaveProduct(name, r) {
+  if (r && r.same && DICT[r.same] && !DICT[r.same].virtual) return r.same;
+  const t = TARA_IDS.indexOf(r.t) >= 0 ? r.t : "jar";
+  const cat = SHOP_CATS.some((c) => c[0] === r.cat) ? r.cat : "other";
+  const slot = SLOT_IDS.indexOf(r.slot) >= 0 ? r.slot : undefined;
+  const ts = {}; ["salt", "sour", "sweet", "umami", "fat", "crunch"].forEach((k) => { const v = num(r.ts && r.ts[k], 0); if (v) ts[k] = Math.min(2, v); });
+  const g = num(r.g, 50) || 50;
+  const d = { n: cap(String(r.n || name).slice(0, 60)), t: t, c: /^#[0-9a-f]{6}$/i.test(r.c || "") ? r.c : "#C9B79A", cell: ["round", "stick", "egg", "tub"].indexOf(r.cell) >= 0 ? r.cell : "round", n0: Math.max(1, Math.min(12, Math.round(num(r.n0, 1)))), z: zoneForPlace(r.place, cat), s: Math.max(1, Math.round(num(r.s, 7))), cat: cat, k: num(r.k, 0), p: num(r.p, 0), f: num(r.f, 0), cb: num(r.cb, 0), note: String(r.note || "").slice(0, 200), syn: name.toLowerCase() };
+  if (slot) {
+    d.slot = slot; d.g = g; d.st = g <= 30 ? 5 : 10; d.ts = ts;
+    const grp = { greens: "greens", crunch: "crunch" }[slot] || (slot === "veg" && !(r.prep && r.prep.text) ? "fresh" : "");
+    d.pr = r.prep && r.prep.text ? [Math.max(1, Math.min(5, Math.round(num(r.prep.order, 3)))), "", String(r.prep.text).slice(0, 300), String(r.prep.device || "").slice(0, 80), String(r.prep.tip || "").slice(0, 200)] : [slot === "crunch" ? 5 : 4, grp, "", "", ""];
+  }
+  const id = "ai:" + name.toLowerCase().replace(/[^a-zа-яё0-9]+/g, "-").slice(0, 40);
+  const ex = S.udict.find((u) => u.id === id);
+  if (ex) ex.dict = d; else S.udict.push({ id: id, kind: "ai", dict: d });
+  registerAI();
+  return id;
+}
+function aiProduct() {
+  const sh = ui.sheet; if (!sh || sh.aiBusy) return;
+  const name = sh.type === "add" ? sh.pick.n : (prodById(sh.id) || {}).name; if (!name) return;
+  sh.aiBusy = true; sh.aiErr = ""; render();
+  aiCall({ task: "product", name: name, known: DICT_LIST.filter((x) => !x.virtual && !x.ai).map((x) => [x.id, x.n]) }).then((r) => {
+    const id = aiSaveProduct(name, r); sh.aiBusy = false;
+    if (ui.sheet !== sh) { commit(); return; }
+    if (sh.type === "add") { A.addLink({ v: id }); commit(); }
+    else { const p = prodById(sh.id); if (p) { p.d = id; learnLink(p.name, id); } commit(); }
+    toast(DICT[id].ai ? "Распознала: " + DICT[id].n + (DICT[id].k ? " · ≈ " + DICT[id].k + " ккал на 100 г" : "") : "Похоже на «" + DICT[id].n + "» — связала");
+  }, (e) => { sh.aiBusy = false; sh.aiErr = e.message; render(); });
+}
+function aiStock() {
+  const seen = {}; const out = [];
+  S.prods.filter((p) => !isEmptyP(p)).forEach((p) => { const k = p.name.toLowerCase(); if (seen[k]) return; seen[k] = 1; out.push([p.d && DICT[p.d] ? (DICT[p.d].ref || p.d) : "", p.name, pStatus(p), leftText(p), zoneById(p.zone).place]); });
+  return out.slice(0, 150);
+}
+function aiRecipe() {
+  const sh = ui.sheet; if (!sh || sh.busy) return;
+  sh.busy = true; sh.err = ""; sh.saved = false; render();
+  const recent = S.diary.filter((e) => e.date > addDays(today(), -7)).map((e) => e.name).slice(-20);
+  const loved = S.recs.filter((r) => r.rating === "love").map((r) => r.name).slice(0, 10);
+  const disliked = S.recs.filter((r) => r.rating === "meh").map((r) => r.name).slice(0, 10);
+  aiCall({ task: "recipe", mode: sh.mode, wish: (sh.wish || "").slice(0, 300), prefs: getPrefs().slice(0, 2000), stock: aiStock(), recent: recent, loved: loved, disliked: disliked, avoid: sh.res ? [sh.res.name] : [], codes: DICT_LIST.filter((d) => d.slot && !d.virtual).map((d) => [d.id, d.n]) }).then((r) => {
+    sh.busy = false; sh.res = aiClean(r); render(); const el = $("#sheet .sheet"); if (el) el.scrollTop = 0;
+  }, (e) => { sh.busy = false; sh.err = e.message; render(); });
+}
+function aiClean(r) {
+  const ings = (Array.isArray(r.ings) ? r.ings : []).slice(0, 25).map((i) => ({ n: String(i.n || "").slice(0, 80), q: String(i.q || "").slice(0, 40), d: i.d && DICT[i.d] ? i.d : null, g: num(i.g, 0) || undefined })).filter((i) => i.n);
+  const steps = (Array.isArray(r.steps) ? r.steps : []).slice(0, 15).map((s) => typeof s === "string" ? [s, "", ""] : [String(s.text || "").slice(0, 500), String(s.device || "").slice(0, 100), String(s.tip || "").slice(0, 300)]).filter((s) => s[0]);
+  const kcal = Math.round(num(r.kcal, 0));
+  return { name: String(r.name || "Рецепт").slice(0, 90), time: Math.round(num(r.time, 30)) || 30, serv: String(r.serv || "1 порция").slice(0, 30), kcal: kcal, p: Math.round(num(r.p, 0)), note: String(r.note || "").slice(0, 400), ings: ings, steps: steps };
+}
+function aiToRecipe(r) {
+  return { id: "r-" + uid(), name: r.name, rating: "new", time: r.time, serv: r.serv, kcal: r.kcal ? "≈ " + r.kcal : "?", kmax: r.kcal || 999, p: r.p, tags: r.steps.some((s) => /Аэрогриль/i.test(s[1] || "")) ? ["airfryer"] : [], src: "ИИ", note: r.note, ings: r.ings, steps: r.steps };
+}
+function shAiRec(sh) {
+  let h = '<div class="between"><h2>Придумать с ИИ</h2><button class="ibtn" data-a="close" aria-label="Закрыть">' + ICON.x + "</button></div>";
+  h += '<label class="lbl">Пожелание — необязательно<input class="in" id="aiWish" data-in="aiWish" value="' + esc(sh.wish || "") + '" placeholder="Например: лёгкий ужин, что-то с тыквой, на двоих"></label>';
+  h += '<div class="chips">' + [["stock", "Только из того, что есть"], ["ideas", "Можно докупить 1–3 продукта"]].map((m) => '<button class="chip' + (sh.mode === m[0] ? " on" : "") + '" data-a="aiMode" data-v="' + m[0] + '">' + m[1] + "</button>").join("") + "</div>";
+  h += '<button class="btn acc" data-a="aiGo"' + (sh.busy ? " disabled" : "") + ">" + (sh.busy ? "Думаю… обычно 10–30 секунд" : sh.res ? "Другой вариант" : "Придумать") + "</button>";
+  if (sh.err) h += '<p class="small" style="color:#C2452F;margin:0">' + esc(sh.err) + "</p>";
+  const r = sh.res;
+  if (r) {
+    const cols = r.ings.filter((i) => i.d).map((i) => DICT[i.d].c).slice(0, 6);
+    h += '<div class="row" style="gap:12px;margin-top:6px"><span class="plate" style="' + plateBG(cols, 72) + '"></span><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><h2 style="font-size:19px">' + esc(r.name) + '</h2><span class="small muted">' + r.time + " мин · " + esc(r.serv) + (r.kcal ? " · ≈ " + r.kcal + " ккал" : "") + (r.p ? " · белок " + r.p + " г" : "") + "</span></div></div>";
+    if (r.note) h += '<p class="p" style="padding:10px 12px;border-radius:14px;background:#EEEAF6;border:1px solid #D8D0EC">' + esc(r.note) + "</p>";
+    h += '<section class="card"><h3>Ингредиенты</h3>' + r.ings.map((i) => { const st = ingStatus(i); const dot = st === null ? "background:#D9CBB8" : st === "no" ? "border:1.5px solid #B5562A;background:#fff" : "background:#4E9A64"; return '<div class="row" style="min-height:34px;border-top:1px solid var(--line2);gap:10px"><span class="ldot" style="flex:none;box-sizing:border-box;' + dot + '"></span><span style="flex:1;font-size:14px;font-weight:700">' + esc(i.n) + '</span><span style="font-size:13px;font-weight:800;color:#4F4237">' + esc(i.q) + "</span></div>"; }).join("") + "</section>";
+    h += '<section style="display:flex;flex-direction:column;gap:8px"><h3>Приготовление</h3>' + stepsHTML(r.steps.map((s) => ({ text: s[0], device: s[1], tip: s[2] }))) + "</section>";
+    h += '<div class="btns"><button class="btn' + (sh.saved ? " green" : "") + '" data-a="aiSave"' + (sh.saved ? " disabled" : "") + ">" + (sh.saved ? "В рецептах ✓" : "Сохранить в рецепты") + "</button>" + (r.ings.some((i) => i.d && i.g && DICT[i.d].slot) ? '<button class="btn" data-a="aiBuild">В конструктор</button>' : "") + "</div>";
+    h += '<p class="small soft" style="margin:0;font-weight:600">Калории и белок ИИ оценивает примерно — для точности открой рецепт в конструкторе.</p>';
+  }
+  return h;
+}
+
 /* ---------- «Приготовила» ---------- */
 function openCook(o) {
   const upd = {};
@@ -566,6 +701,7 @@ function vSettings() {
   else if (!SYN.hh) h += '<p class="p">Вошла как <b>' + esc(SYN.email) + '</b>. Осталось создать «дом» — общее хранилище. Если «Кладовую» уже завёл кто-то из семьи, введи его код.</p><button class="btn acc" data-a="syCreate">Создать мой дом и выгрузить данные</button><label class="lbl">Или код приглашения<input class="in" id="syCode" placeholder="Например, A1B2C3" autocapitalize="characters"></label><button class="btn" data-a="syJoin">Присоединиться по коду</button><p class="small" id="syErr" style="color:#C2452F;margin:0"></p><button class="btn ghost" data-a="syLogout">Выйти</button>';
   else h += '<p class="p">Вошла как <b>' + esc(SYN.email) + "</b>. Статус: " + ({ ok: "всё синхронизировано ✓", busy: "синхронизирую…", offline: "нет связи — синхронизирую позже", error: "ошибка: " + esc(syncErr), off: "выключено" }[syncState] || "") + "</p>" + (syncInfo ? '<p class="p">Код приглашения для семьи: <b style="font-size:18px;letter-spacing:.1em">' + esc(syncInfo.code) + "</b></p>" : "") + '<div class="btns"><button class="btn" data-a="syNow">Синхронизировать</button><button class="btn ghost" style="min-height:48px" data-a="syLogout">Выйти</button></div>';
   h += "</section>";
+  h += '<section class="card big"><h3>ИИ-помощник</h3><p class="p">' + (aiOn() ? "Подключён (YandexGPT). Кнопки «Придумать с ИИ» — в конструкторе и рецептах, «Распознать с ИИ» — у продуктов не из справочника. Работает, когда ты вошла в ☁︎." : "Не подключён. Как подключить YandexGPT — в ИНСТРУКЦИИ, раздел про Yandex Cloud.") + '</p><label class="lbl">Мои вкусы — ИИ учитывает их в каждом рецепте<textarea class="in" id="prefsTA" data-in="prefs" rows="7" style="padding:10px 14px;font-size:14px;font-weight:600;line-height:1.45;min-height:150px">' + esc(getPrefs()) + "</textarea></label></section>";
   h += '<section class="card big"><h3>Резервная копия</h3><p class="p">Файл со всеми продуктами, рецептами, дневником и закупками. Удобно перед большими изменениями.</p><div class="btns"><button class="btn" data-a="exportJSON">Скачать копию</button><label class="btn" style="cursor:pointer">Загрузить<input type="file" accept="application/json,.json" data-ch="importJSON" style="display:none"></label></div></section>';
   h += '<section class="card big"><h3>Пример данных</h3><p class="p">Положит в холодильник, морозилку и кладовку продукты из макета — чтобы посмотреть, как всё работает. Потом лишнее можно отметить «Закончилось».</p><button class="btn" data-a="sample">Загрузить пример</button></section>';
   h += '<p class="small soft" style="margin:0">Кладовая · версия 1.0 · продуктов: ' + S.prods.length + ", рецептов: " + S.recs.length + ", записей в дневнике: " + S.diary.length + "</p>";
@@ -577,7 +713,7 @@ function viewHTML() { return ui.view === "builder" ? vBuilder() : ui.view === "r
 function sheetHTML() {
   const sh = ui.sheet; let body = "";
   if (sh.type === "prod") body = shProd(sh); else if (sh.type === "add") body = shAdd(sh); else if (sh.type === "cook") body = shCook(sh);
-  else if (sh.type === "dAdd") body = shDiaryAdd(sh); else if (sh.type === "share") body = shShare(sh);
+  else if (sh.type === "dAdd") body = shDiaryAdd(sh); else if (sh.type === "share") body = shShare(sh); else if (sh.type === "aiRec") body = shAiRec(sh);
   else if (sh.type === "saveRec") body = '<h2>Сохранить рецепт</h2><label class="lbl">Название<input class="in" id="srName" data-in="srName" value="' + esc(sh.name) + '"></label><div class="btns"><button class="btn" data-a="close">Отмена</button><button class="btn acc" data-a="srSave">Сохранить</button></div>';
   else if (sh.type === "gone") body = "<h2>" + esc(sh.name) + ' закончилось</h2><p class="p">Добавить в список покупок?</p><div class="btns"><button class="btn" data-a="close">Нет</button><button class="btn acc" data-a="goneShop">Да, в закупки</button></div>';
   else if (sh.type === "confirm") body = "<h2>" + esc(sh.title) + '</h2><p class="p">' + esc(sh.text) + '</p><div class="btns"><button class="btn" data-a="close">Отмена</button><button class="btn acc" data-a="confirmYes">' + esc(sh.yes) + "</button></div>";
@@ -616,8 +752,16 @@ const A = {
   pGone() { const p = prodById(ui.sheet.id); S.prods.splice(S.prods.indexOf(p), 1); const inShop = S.shop.some((x) => !x.done && (x.pid === p.id || (p.d && x.d === p.d))); ui.sheet = inShop ? null : { type: "gone", name: p.name, d: p.d }; commit(); },
   goneShop() { const sh = ui.sheet; shopAdd({ name: sh.name, d: sh.d, why: [["low", "закончилось"]] }); ui.sheet = null; commit(); toast("Добавила в закупки: " + sh.name); },
   add(d) { ui.sheet = { type: "add", q: "", pick: null, preset: d.z || null }; render(); setTimeout(() => { const i = $("#addQ"); if (i) i.focus(); }, 60); },
-  addPick(d) { const sh = ui.sheet; const dd = d.v.indexOf("uc:") === 0 ? (() => { const u = learned(d.v); return { id: d.v, n: u.name, t: u.t, c: u.c, z: u.z, cell: u.cell, custom: true }; })() : DICT[d.v]; const df = dd.custom ? { t: dd.t, z: dd.z, n0: 1, s: 0 } : dictDefaults(dd);
-    Object.assign(sh, { pick: dd, q: dd.n, tara: df.t, taraDef: df.t, zone: sh.preset || df.z, level: 1, have: df.n0 || 1, srok: nearestSrok(df.s), srokDef: df.s && df.s < 999 ? df.s : 0 }); render(); },
+  addPick(d) { const sh = ui.sheet; const u0 = d.v.indexOf("uc:") === 0 ? learned(d.v) : null; const dd = u0 ? { id: d.v, n: u0.name, t: u0.t, c: u0.c, z: u0.z, cell: u0.cell, custom: true } : DICT[d.v]; const L = u0 && u0.link && DICT[u0.link] ? DICT[u0.link] : null; const df = dd.custom ? { t: dd.t, z: dd.z, n0: L ? (L.n0 || 1) : 1, s: L ? L.s : 0 } : dictDefaults(dd);
+    Object.assign(sh, { pick: dd, link: L ? L.id : null, q: dd.n, tara: df.t, taraDef: df.t, zone: sh.preset || df.z, level: 1, have: df.n0 || 1, srok: nearestSrok(df.s), srokDef: df.s && df.s < 999 ? df.s : 0 }); render(); },
+  addLink(d) { const sh = ui.sheet; if (sh.link === d.v) { sh.link = null; render(); return; } sh.link = d.v; const df = dictDefaults(DICT[d.v]); Object.assign(sh, { tara: df.t, taraDef: df.t, zone: sh.preset || df.z, have: df.n0 || 1, srok: nearestSrok(df.s), srokDef: df.s && df.s < 999 ? df.s : 0 }); if (df.cell) sh.pick.cell = df.cell; if (!sh.pick.c || sh.pick.c === "#C9B79A") sh.pick.c = DICT[d.v].c; render(); },
+  pLink(d) { const p = prodById(ui.sheet.id); p.d = p.d === d.v ? null : d.v; if (p.d) { learnLink(p.name, p.d); if (DICT[p.d].cell && p.t === "count") p.cell = DICT[p.d].cell; } commit(); },
+  aiProduct() { aiProduct(); },
+  aiRec() { ui.sheet = { type: "aiRec", wish: "", mode: ui.view === "builder" && ui.b.mode === "ideas" ? "ideas" : "stock" }; render(); },
+  aiMode(d) { ui.sheet.mode = d.v; render(); },
+  aiGo() { aiRecipe(); },
+  aiSave() { const r = ui.sheet.res; if (!r) return; S.recs.unshift(aiToRecipe(r)); ui.sheet.saved = true; commit(); toast("Сохранила в рецепты: " + r.name); },
+  aiBuild() { const r = ui.sheet.res; ui.b.name = r.name; ui.b.items = r.ings.filter((i) => i.d && i.g && DICT[i.d] && DICT[i.d].slot).map((i) => ({ d: i.d, g: i.g })); ui.b.mode = "ideas"; ui.view = "builder"; ui.sheet = null; render(); },
   addCustom() { const sh = ui.sheet, q = sh.q.trim(); const name = cap(q); Object.assign(sh, { pick: { id: "uc:" + q.toLowerCase(), n: name, t: "jar", c: "#C9B79A", custom: true }, q: name, tara: "jar", taraDef: "jar", zone: sh.preset || "f1", level: 1, have: 1, srok: 7, srokDef: 0 }); render(); },
   addTara(d) { const sh = ui.sheet; sh.tara = d.id; if (d.id === "count" && !sh.have) sh.have = 1; render(); },
   addZone(d) { ui.sheet.zone = d.v; render(); },
@@ -628,6 +772,7 @@ const A = {
     const sh = ui.sheet, dd = sh.pick;
     const p = makeProd({ name: dd.n, d: dd.custom ? null : dd.id, t: sh.tara, c: dd.c, cell: dd.cell, zone: sh.zone, l: sh.level, have: sh.have, max: sh.have, exp: sh.srok ? addDays(today(), sh.srok) : null });
     S.prods.push(p);
+    if (sh.link) { p.d = sh.link; }
     if (dd.custom) learnCustom(dd, sh); else { const df = dictDefaults(dd); if (sh.tara !== df.t || (!sh.preset && sh.zone !== df.z)) learn(dd.id, { t: sh.tara, z: sh.zone }); }
     const z = zoneById(sh.zone); ui.place = z.place; ui.view = "storage"; ui.sheet = null; commit(); toast("Положила: " + p.name + " → " + zoneLabel(z).toLowerCase());
   },
@@ -724,17 +869,20 @@ const IN = {
   recQ(v) { ui.r.q = v; const box = $("#recList"); if (box) box.innerHTML = recListHTML(); },
   srName(v) { ui.sheet.name = v; },
   daName(v) { ui.sheet.name = v; }, daK(v) { ui.sheet.k = v; }, daP(v) { ui.sheet.p = v; },
-  shDraft(v) { ui.sh.draft = v; }
+  shDraft(v) { ui.sh.draft = v; },
+  aiWish(v) { if (ui.sheet) ui.sheet.wish = v; },
+  prefs(v) { let u = S.udict.find((x) => x.id === "prefs"); if (!u) { u = { id: "prefs" }; S.udict.push(u); } u.text = v; clearTimeout(IN.t); IN.t = setTimeout(() => commit(true), 800); }
 };
 const CH = {
   pExp(v) { const p = prodById(ui.sheet.id); p.exp = v || null; commit(); },
   bG(v, el) { const x = ui.b.items.find((y) => y.d === el.dataset.v); if (x) { const n = parseInt(v, 10); x.g = isNaN(n) ? 0 : Math.max(0, Math.min(2000, n)); render(); } },
   shDone(v, el) { const x = S.shop.find((y) => y.id === el.dataset.id); if (x) { x.done = el.checked; commit(); } },
-  importJSON(v, el) { const f = el.files && el.files[0]; if (!f) return; f.text().then((t) => { const o = JSON.parse(t); if (!o || !Array.isArray(o.prods)) throw new Error("bad"); S = Object.assign(freshState(), o); commit(); toast("Копия загружена"); }).catch(() => toast("Не получилось прочитать файл")); }
+  importJSON(v, el) { const f = el.files && el.files[0]; if (!f) return; f.text().then((t) => { const o = JSON.parse(t); if (!o || !Array.isArray(o.prods)) throw new Error("bad"); S = Object.assign(freshState(), o); registerAI(); commit(); toast("Копия загружена"); }).catch(() => toast("Не получилось прочитать файл")); }
 };
 function fallbackCopy(t) { const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch (e) {} ta.remove(); }
 function learn(dictId, patch) { const key = "ud:" + dictId; let u = learned(key); if (!u) { u = { id: key, d: dictId }; S.udict.push(u); } Object.assign(u, patch); }
-function learnCustom(dd, sh) { const key = "uc:" + dd.n.toLowerCase(); let u = learned(key); if (!u) { u = { id: key }; S.udict.push(u); } Object.assign(u, { name: dd.n, t: sh.tara, z: sh.zone, c: dd.c || "#C9B79A", cell: "round" }); }
+function learnCustom(dd, sh) { const key = "uc:" + dd.n.toLowerCase(); let u = learned(key); if (!u) { u = { id: key }; S.udict.push(u); } Object.assign(u, { name: dd.n, t: sh.tara, z: sh.zone, c: dd.c || "#C9B79A", cell: dd.cell || "round", link: sh.link || null }); }
+function learnLink(name, id) { const key = "uc:" + name.toLowerCase(); const u = learned(key); if (u) u.link = id; }
 function autoName(C) { if (ui.b.name) return ui.b.name; const ids = C.items.map((x) => x.d); const base = ids.find((id) => DICT[id].slot === "base"), prot = ids.find((id) => DICT[id].slot === "protein"), veg = ids.find((id) => DICT[id].slot === "veg"); const parts = [prot, veg, base].filter(Boolean).map((id) => (DICT[id].short || DICT[id].n.split(" ")[0]).toLowerCase()); return parts.length ? (base ? "Боул: " : "Тёплый салат: ") + parts.join(", ") : "Моя тарелка"; }
 
 document.addEventListener("click", (e) => {
@@ -794,7 +942,7 @@ async function syncPull() {
     if (local === sh) { applyItem(r.key, r.data, r.deleted); if (r.deleted) delete SHADOW[r.key]; else SHADOW[r.key] = JSON.stringify(r.data); changed = true; }
     if (r.updated_at > SYN.last) SYN.last = r.updated_at;
   });
-  if (changed) await idbPut("state", S);
+  if (changed) { registerAI(); await idbPut("state", S); }
   await saveSyncMeta();
   return changed;
 }
@@ -856,6 +1004,7 @@ function ruErr(e) {
 (async function boot() {
   let st = null; try { st = await idbGet("state"); } catch (e) {}
   S = st && st.v ? Object.assign(freshState(), st) : freshState();
+  registerAI();
   if (!st) idbPut("state", S);
   ready = true; render();
   syncBoot();

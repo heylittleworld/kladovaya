@@ -43,7 +43,7 @@ const ICON = {
 let S = null;
 let ready = false;
 const ui = {
-  view: "storage", place: "fridge", onlySoon: false, exp: {}, sheet: null, scrolls: {},
+  view: "storage", place: "fridge", storageZones: {}, onlySoon: false, exp: {}, sheet: null, scrolls: {},
   b: { mode: "stock", items: [], oil: 5, open: null, allHints: false },
   r: { filter: "all", q: "", open: null },
   dy: { date: today(), open: null },
@@ -198,20 +198,30 @@ function vStorage() {
     if (low.length) h += '<div class="alert"><span class="badge" style="background:#E8A93A">' + low.length + '</span><span style="flex:1;min-width:0"><span style="display:block;font-size:14px;font-weight:800">Заканчивается</span><span class="ell small muted" style="display:block">' + esc(low.map((p) => p.name).join(", ")) + "</span></span></div>";
   }
   const sel = ui.sheet && ui.sheet.type === "prod" ? ui.sheet.id : null;
-  zonesOf(place).forEach((z, i) => {
+  const zones = zonesOf(place);
+  const savedZone = ui.storageZones[place];
+  const activeZone = savedZone === "all" || zones.some((z) => z.id === savedZone) ? savedZone : (zones[0] && zones[0].id);
+  h += '<div class="storage-layout"><nav class="storage-rail" aria-label="Полки и ящики"><button data-a="storageZone" data-id="all" aria-pressed="' + (activeZone === "all") + '">Все</button>';
+  zones.forEach((z) => {
+    const short = /^Полка\s+\d+$/i.test(z.title) ? z.title.replace(/^Полка\s+/i, "") : /^Ящик\s+\d+$/i.test(z.title) ? z.title.replace(/^Ящик\s+/i, "") : z.title === "0 °C Fresh" ? "0 °C" : z.title;
+    h += '<button data-a="storageZone" data-id="' + z.id + '" aria-label="' + esc(z.title) + '" aria-pressed="' + (activeZone === z.id) + '">' + esc(short) + '</button>';
+  });
+  h += '</nav><div class="storage-content">';
+  zones.forEach((z, i) => {
+    if (activeZone !== "all" && activeZone !== z.id) return;
     const items = S.prods.filter((p) => p.zone === z.id);
-    const key = z.id, exp = !!ui.exp[key], over = items.length > 8;
+    const key = z.id, exp = activeZone !== "all" || !!ui.exp[key], over = items.length > 8;
     const shown = over && !exp ? items.slice(0, 7) : items;
     h += '<section class="card" aria-label="' + esc(z.title) + '"><div class="between">' + pill(i + (place === "door" ? 2 : place === "freezer" ? 1 : place === "pantry" ? 3 : 0), z.title) +
       '<span class="row"><span class="small soft">' + (items.length ? items.length + " " + plural(items.length, "продукт", "продукта", "продуктов") : "") + '</span><button class="addbtn" data-a="add" data-z="' + z.id + '" aria-label="Добавить: ' + esc(z.title) + '">' + ICON.plusS + "</button></span></div>";
     if (items.length) {
       h += '<div class="grid4">' + shown.map((p) => tileHTML(p, { dim: dimOn && !(pStatus(p) === "soon" || pStatus(p) === "urgent"), sel: sel === p.id })).join("");
-      if (over) h += '<button class="more" data-a="expZone" data-id="' + key + '" aria-expanded="' + exp + '">' + (exp ? "Свернуть" : "Ещё " + (items.length - shown.length)) + "</button>";
+      if (over && activeZone === "all") h += '<button class="more" data-a="expZone" data-id="' + key + '" aria-expanded="' + exp + '">' + (exp ? "Свернуть" : "Ещё " + (items.length - shown.length)) + "</button>";
       h += "</div>";
     } else h += '<p class="p soft" style="margin:0">Пусто — нажми «+», чтобы положить продукт</p>';
     h += "</section>";
   });
-  h += '<div class="legend">' + [["fresh", "Свежее"], ["soon", "2–3 дня"], ["urgent", "Сегодня-завтра"], ["unknown", "Срок не указан"]].map((x) => '<span><span class="ldot st-' + x[0] + '" style="' + (x[0] === "unknown" ? "border:1.5px solid #A89B8C" : "") + '"></span>' + x[1] + "</span>").join("") + "</div>";
+  h += '</div></div><div class="legend">' + [["fresh", "Свежее"], ["soon", "2–3 дня"], ["urgent", "Сегодня-завтра"], ["unknown", "Срок не указан"]].map((x) => '<span><span class="ldot st-' + x[0] + '" style="' + (x[0] === "unknown" ? "border:1.5px solid #A89B8C" : "") + '"></span>' + x[1] + "</span>").join("") + "</div>";
   return h;
 }
 
@@ -826,7 +836,8 @@ const A = {
   go(d) { if (d.v === "settings" && ui.view !== "settings") ui.prevView = ui.view; ui.view = d.v; ui.sheet = null; if (d.v === "recipes") ui.r.open = ui.r.open; render(); if (d.v === "settings") loadSyncInfo(); },
   close() { closeSheet(); },
   place(d) { ui.place = d.v; ui.onlySoon = false; render(); },
-  onlySoon() { ui.onlySoon = !ui.onlySoon; render(); },
+  onlySoon() { ui.onlySoon = !ui.onlySoon; if (ui.onlySoon) ui.storageZones[ui.place] = "all"; render(); },
+  storageZone(d) { ui.storageZones[ui.place] = d.id; ui.scrolls.storage = 0; const sc = $("#scroller"); if (sc) sc.scrollTop = 0; render(); },
   expZone(d) { ui.exp[d.id] = !ui.exp[d.id]; render(); },
   prod(d) { ui.sheet = { type: "prod", id: d.id }; render(); },
   pCount(d) { const p = prodById(ui.sheet.id); p.have = Math.max(0, Math.min(p.max + 20, p.have + Number(d.v))); if (p.have > p.max) p.max = p.have; commit(); },
